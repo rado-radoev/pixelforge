@@ -1,0 +1,3012 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="color-scheme" content="dark"/>
+<link rel="icon" href="data:,"/>
+<title>Pixelforge — Software, built by a swarm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#060607; --bg2:#0b0b0d; --panel:#111214;
+  --white:#f5f5f3; --grey:#9a9a9e; --grey2:#6b6b70;
+  --blue:#2f7bff; --blue-dim:rgba(47,123,255,.55);
+  --red:#ff3b30; --orange:#ff7a1a;
+  --line:rgba(255,255,255,.09);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--white);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+.mono{font-family:"JetBrains Mono",monospace}
+.red-edge{position:fixed;left:0;top:0;bottom:0;width:3px;background:var(--red);z-index:60}
+.red-edge::after{content:"";position:absolute;left:3px;top:18%;width:1px;height:120px;background:rgba(255,59,48,.35)}
+#swarm{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:55;overflow:visible}
+
+/* ============ BUILD SYSTEM ============ */
+/* Wireframe state for a section that hasn't been built yet */
+.build-section{position:relative}
+.build-section:not(.is-built)::before{
+  content:"";position:absolute;inset:18px 0;pointer-events:none;opacity:.5;
+  background:
+    linear-gradient(rgba(47,123,255,.05) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(47,123,255,.05) 1px,transparent 1px);
+  background-size:44px 44px;
+  border:1px dashed rgba(47,123,255,.14);
+}
+.build-section.is-built::before{opacity:0;transition:opacity .6s}
+.build-section .build-tag{
+  position:absolute;top:14px;right:0;font-family:"JetBrains Mono",monospace;font-size:10px;
+  letter-spacing:.14em;color:var(--blue);border:1px dashed rgba(47,123,255,.45);
+  padding:4px 8px;text-transform:uppercase;background:rgba(6,6,7,.7);z-index:4;pointer-events:none;
+  transition:opacity .4s;
+}
+.build-section.is-built .build-tag{opacity:0}
+.build-section.is-building .build-tag{color:#fff;border-color:var(--blue);border-style:solid;background:var(--blue)}
+
+/* Every buildable piece */
+.build-item{
+  position:relative;
+  transition:opacity .55s ease,transform .68s cubic-bezier(.2,.9,.24,1),border-color .5s ease,background-color .5s ease,box-shadow .3s ease;
+  will-change:transform,opacity;
+}
+.build-item>*{transition:opacity .45s ease .1s,transform .45s ease .05s}
+/* Generic unbuilt: hidden, scattered */
+.build-item.pending{opacity:0;transform:translateY(24px) translateX(var(--scatter,0px)) rotate(var(--rot,0deg)) scale(.985)}
+/* Boxes keep a faint empty outline so you see the wireframe waiting to be built */
+.build-item.pending.blue-box{opacity:1;background:transparent!important;border:1px dashed rgba(47,123,255,.22);outline:none;transform:translateY(16px) translateX(var(--scatter,0px));box-shadow:none!important}
+.build-item.pending.blue-box>*{opacity:0;transform:translateY(8px)}
+.build-item.pending.mock{opacity:1;background:rgba(26,34,46,.28);border:1px dashed rgba(255,255,255,.14);transform:translateY(18px)}
+.build-item.pending.mock>*{opacity:0}
+.build-item.pending.white-card{opacity:1;background:rgba(255,255,255,.07);transform:translateY(18px) rotate(-.5deg)}
+.build-item.pending.white-card>*{opacity:0}
+.build-item.pending.white-card::before{opacity:0}
+.build-item.built.white-card::before{opacity:1}
+/* Teeth assemble piece by piece inside the mockup */
+.tooth{transition:opacity .35s ease var(--d,0ms),transform .35s ease var(--d,0ms),border-color .2s,box-shadow .2s}
+#mockBox.teeth-wait .tooth{opacity:0;transform:scale(.45) translateY(10px) rotate(6deg)}
+/* Selection rectangle flashing around the piece about to be built */
+.build-item.is-targeted{z-index:6}
+.build-item.is-targeted::after{
+  content:"";position:absolute;inset:-8px;border:1.5px solid var(--blue);pointer-events:none;z-index:7;
+  animation:targetPulse .45s ease-in-out infinite alternate;
+}
+.build-item.red-target.is-targeted::after{border-color:var(--red)}
+.build-item.is-targeted .corner{position:absolute;width:8px;height:8px;background:#fff;border:1.5px solid var(--blue);z-index:8;pointer-events:none}
+.build-item.red-target .corner{border-color:var(--red)}
+/* Progress bar that draws itself while the bots "work" on a piece */
+.build-progress{position:absolute;left:-8px;right:-8px;bottom:-16px;height:3px;background:rgba(47,123,255,.18);z-index:9;pointer-events:none;overflow:hidden}
+.build-progress i{display:block;height:100%;width:0%;background:var(--blue);transition-property:width;transition-timing-function:linear}
+.build-item.red-target .build-progress i{background:var(--red)}
+.build-item.is-targeted{animation:targetWork .5s ease-in-out infinite alternate}
+@keyframes targetWork{from{box-shadow:0 0 0 rgba(47,123,255,0)}to{box-shadow:0 0 18px rgba(47,123,255,.12)}}
+@keyframes targetPulse{from{opacity:.55}to{opacity:1}}
+/* ---- Inner-component steps + pixel-by-pixel construction ---- */
+.sub-hidden{opacity:0!important}
+.pix,.pix *{transition:none!important}
+.pixveil{position:absolute;inset:0;width:100%;height:100%;z-index:6;pointer-events:none;image-rendering:pixelated}
+.wstep{display:inline-block;position:relative;vertical-align:bottom}
+.pix-host{position:relative}
+.twk-ch{transition:color .7s ease,background-color .3s ease}
+.white-card.no-frame::before{opacity:0}
+@media(max-width:760px){
+  /* no sideways scatter/rotation while unbuilt — keeps phone width overflow-free */
+  .build-item.pending,.build-item.pending.blue-box,.build-item.pending.mock,.build-item.pending.white-card{transform:translateY(14px)}
+}
+@media (prefers-reduced-motion: reduce){
+  .build-item,.build-item>*,.tooth,.build-progress i{transition:none!important}
+  .build-item.is-targeted::after{animation:none}
+  .build-item.is-targeted{animation:none}
+}
+
+/* header */
+header{position:fixed;top:0;left:3px;right:0;z-index:50;background:rgba(6,6,7,.88);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.hwrap{max-width:1180px;margin:0 auto;padding:0 28px;height:64px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:-.02em;font-size:17px}
+.logo-mark{width:22px;height:22px;background:#fff;display:grid;place-items:center;flex-shrink:0}
+.logo-mark i{width:10px;height:10px;background:#060607;display:block}
+nav{display:flex;gap:28px;font-size:13.5px;font-weight:500;color:#d6d6d8}
+nav a:hover{color:#fff}
+@media(max-width:640px){.hwrap{padding:8px 14px;height:auto;min-height:56px;flex-wrap:wrap;row-gap:6px}.logo{font-size:15px}nav{gap:12px;font-size:12px;flex-wrap:wrap} .hero-top{flex-direction:column;align-items:flex-start!important;gap:6px} .hero-top .mono{display:none} }
+
+/* layout */
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px;position:relative}
+@media(max-width:640px){.wrap{padding:0 18px}}
+section{position:relative}
+.hero{min-height:92vh;display:flex;flex-direction:column;justify-content:center;padding:130px 0 70px;border-bottom:1px solid var(--blue-dim)}
+.hero-top{display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--grey);margin-bottom:56px}
+.hero-top .dot{width:7px;height:7px;background:var(--orange);display:inline-block;margin-right:8px;vertical-align:middle}
+.hero-center{display:flex;flex-direction:column;align-items:center;text-align:center}
+.grey-sq{width:54px;height:54px;background:#2a2a2e;border:1px solid #3a3a3e;display:grid;place-items:center;margin-bottom:28px;position:relative}
+.grey-sq::after{content:"";position:absolute;inset:10px;border:1px solid #555}
+.grey-sq span{width:12px;height:12px;background:#888;display:block;position:relative;z-index:1}
+.hero h1{font-size:clamp(52px,9vw,108px);line-height:.92;letter-spacing:-.04em;font-weight:900;margin:0;max-width:900px}
+.hero h1 em{font-style:normal;color:#fff}
+.hero h1 .thin{color:#3a3a3e}
+.hero p{color:var(--grey);font-size:15px;line-height:1.6;max-width:520px;margin:22px auto 0}
+.hero-meta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:28px}
+.pill{border:1px solid #2a2a2e;padding:7px 12px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#c9c9cc}
+.pill b{color:#fff}
+.label{color:var(--orange);font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;display:flex;align-items:center;gap:10px}
+.label::after{content:"";height:1px;background:var(--blue);flex:1;opacity:.6}
+h2{font-size:clamp(38px,6vw,68px);line-height:.95;letter-spacing:-.035em;font-weight:800;margin:14px 0 18px}
+h3{font-size:22px;letter-spacing:-.02em;margin:0 0 8px}
+.sec{padding:84px 0;border-bottom:1px solid rgba(47,123,255,.35)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+.blue-box{border:1px solid var(--blue);padding:20px 20px 18px;background:rgba(47,123,255,.03);position:relative}
+.blue-box p{color:var(--grey);font-size:13.5px;line-height:1.65;margin:6px 0 0}
+.blue-box .num{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--blue);letter-spacing:.1em}
+.red-box{outline:1.5px solid var(--red);outline-offset:6px}
+.build-item.pending.red-box{outline:none}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.tags span{font-size:11px;border:1px solid #2c2c30;padding:5px 8px;color:#c8c8cb}
+.work-head{display:flex;justify-content:space-between;align-items:end;gap:20px;flex-wrap:wrap}
+.proj-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 16px}
+.proj-tabs button{appearance:none;background:#141416;border:1px solid #2a2a2e;color:#ddd;padding:10px 14px;font-weight:600;font-size:13px;cursor:pointer}
+.proj-tabs button.active{background:#fff;color:#000;border-color:#fff}
+.mock{border:1px solid #333;background:#1a222e;border-radius:6px;overflow:hidden;position:relative}
+.mock-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#121a26;border-bottom:1px solid #2a3444;color:#8a95a5;font-size:12px}
+.mock-bar i{width:10px;height:10px;border-radius:50%;background:#333;display:block;flex-shrink:0}
+.mock-body{display:grid;grid-template-columns:200px 1fr;min-height:340px}
+@media(max-width:700px){.mock-body{grid-template-columns:1fr}.mock-side{display:none}}
+.mock-side{border-right:1px solid #2a3444;padding:16px;background:#151d29}
+.mock-side div{height:10px;background:#2b3648;margin-bottom:10px;border-radius:2px}
+.mock-main{padding:18px;background:linear-gradient(180deg,#1e293b,#182231)}
+.tooth-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}
+@media(max-width:520px){.tooth-grid{grid-template-columns:repeat(4,1fr)}}
+.tooth{aspect-ratio:1;background:#e8edf3;border-radius:6px 6px 10px 10px;position:relative;border:2px solid transparent}
+.tooth.sel-tooth{border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,123,255,.25)}
+.tooth.sel-tooth::after{content:"";position:absolute;right:-4px;top:-4px;width:8px;height:8px;background:#fff;border:2px solid var(--blue)}
+.tooth:nth-child(3n){background:#cbd5e1}.tooth:nth-child(5n){background:#f1f5f9}
+.mock-caption{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;color:var(--grey);font-size:12.5px}
+.prod-layout{display:grid;grid-template-columns:1.15fr .85fr;gap:32px;align-items:start}
+@media(max-width:820px){.prod-layout{grid-template-columns:1fr}}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:22px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media(max-width:820px){.grid3{grid-template-columns:1fr}}
+.mock-side div.side-item{height:auto;background:#1b2635;color:#cbd5e1;font-size:12px;font-weight:600;padding:8px 10px;border:1px solid #2a3444;border-radius:4px;margin-bottom:8px}
+.mock-side div.side-item b{color:#fff;display:block;font-size:11px;letter-spacing:.08em}
+.mock-side div.side-item span{color:#7db0ff;font-family:"JetBrains Mono",monospace;font-size:10px}
+.tooth{border-radius:7px}
+.stat{border-top:2px solid #fff;padding-top:12px}
+.stat b{font-size:28px;letter-spacing:-.03em;display:block}
+.stat span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--grey)}
+.contact-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:28px;align-items:start}
+@media(max-width:820px){.contact-grid{grid-template-columns:1fr}}
+.white-card{background:#fff;color:#0a0a0a;padding:26px;border-radius:4px;position:relative;transition:background-color .5s ease,opacity .55s ease,transform .68s cubic-bezier(.2,.9,.24,1)}
+.white-card::before{content:"";position:absolute;inset:-7px;border:1.5px solid var(--red);pointer-events:none;transition:opacity .4s}
+.white-card h3{font-size:18px}
+.white-card a.mail{font-size:18px;font-weight:700;letter-spacing:-.02em;display:block;margin:10px 0 18px;word-break:break-all}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 16px;font-weight:700;font-size:13.5px;border-radius:999px;border:1px solid #0a0a0a}
+.btn.dark{background:#0a0a0a;color:#fff}
+.btn.light{background:#fff;color:#0a0a0a}
+footer{padding:52px 0 110px;background:#050505;position:relative}
+.foot{display:grid;grid-template-columns:1.3fr .8fr .9fr;gap:28px}
+@media(max-width:760px){.foot{grid-template-columns:1fr}}
+footer p, footer li, footer a{font-size:13.5px;line-height:1.7;color:var(--grey)}
+footer ul{list-style:none;padding:0;margin:10px 0 0}
+footer h4{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#fff;margin:0 0 6px}
+.copy{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--grey2)}
+
+/* HUD */
+.hud{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:70;background:#101012;border:1px solid #2a2a2e;border-radius:999px;padding:8px 8px 8px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 12px 40px rgba(0,0,0,.6);max-width:calc(100vw - 20px)}
+.hud-bot{width:26px;height:26px;flex-shrink:0;display:grid;place-items:center;background:#1c1c1f;border-radius:8px}
+.hud-text{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hud-text span{color:var(--grey);font-weight:500}
+.hud-bar{width:64px;height:4px;background:#222;border-radius:99px;overflow:hidden;flex-shrink:0}
+.hud-bar i{display:block;height:100%;width:0%;background:var(--blue);transition:width .25s}
+#replayBtn{background:var(--blue);color:#fff;border:0;padding:8px 14px;border-radius:999px;font-weight:700;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:6px;flex-shrink:0}
+#replayBtn:active{transform:scale(.97)}
+@media(max-width:560px){.hud-bar{display:none}.hud-text{font-size:11.5px}.hud-text .hud-sec{display:none}#hudCrew{display:none}}
+.hint{font-size:12px;color:var(--grey2);text-align:center;margin-top:14px}
+
+/* ============ BOT SPEECH BUBBLE (tap a bot) ============ */
+#botBubble{position:fixed;left:0;top:0;width:248px;z-index:80;pointer-events:none;background:#101216;border:1px solid #2c313a;border-top:3px solid var(--bb,#ffd60a);padding:10px 12px 11px;opacity:0;visibility:hidden;box-shadow:0 14px 34px rgba(0,0,0,.55);font-size:12px;color:var(--white)}
+#botBubble.show{opacity:1;visibility:visible;pointer-events:auto}
+#botBubble .bb-close{appearance:none;background:#1c1f26;border:1px solid #2c313a;color:#c9cdd6;width:22px;height:22px;line-height:1;font-size:13px;cursor:pointer;flex-shrink:0;padding:0}
+#botBubble .bb-close:hover{color:#fff;border-color:var(--bb,#ffd60a)}
+#botBubble .bb-live{color:#7db0ff;font-family:"JetBrains Mono",monospace;font-size:10.5px;margin-top:5px;line-height:1.5}
+#botBubble .bb-live b{color:#fff;font-weight:700}
+#botBubble .bb-lastdec{margin-top:6px;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#c9cdd6;line-height:1.5;border-top:1px dashed #2a2e37;padding-top:6px}
+#botBubble .bb-watch{margin-top:9px;width:100%;appearance:none;background:var(--blue);color:#fff;border:0;padding:8px 10px;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit}
+#botBubble .bb-watch:hover{filter:brightness(1.12)}
+#botBubble .bb-head{font-weight:800;font-size:12.5px;letter-spacing:-.01em;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+#botBubble .bb-dot{width:8px;height:8px;border-radius:50%;background:var(--bb,#ffd60a);flex-shrink:0;margin-top:4px}
+#botBubble .bb-job{color:#c9cdd6;margin-top:3px;line-height:1.45}
+#botBubble .bb-quip{color:#fff;font-style:italic;margin-top:6px;line-height:1.45}
+#botBubble .bb-traits{margin-top:8px;display:grid;gap:4px}
+#botBubble .bb-trait{display:grid;grid-template-columns:88px 1fr 30px;align-items:center;gap:6px;font-family:"JetBrains Mono",monospace;font-size:9px;color:#9aa0ab;letter-spacing:.03em}
+#botBubble .bb-trait i{height:4px;background:#23262c;display:block}
+#botBubble .bb-trait i em{display:block;height:100%;background:var(--bb,#ffd60a)}
+#botBubble .bb-trait b{color:#e6e8ec;font-weight:600;text-align:right}
+#botBubble .bb-hint{margin-top:7px;font-size:10px;color:#6f757f;font-family:"JetBrains Mono",monospace}
+@media(max-width:560px){#botBubble{width:min(248px,calc(100vw - 16px))}}
+
+/* ============ DECISION NETWORK (Lab) ============ */
+.brain-panel{border:1px solid var(--blue);background:rgba(47,123,255,.03);padding:16px 16px 14px;position:relative}
+.brain-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.brain-botdot{width:26px;height:26px;flex-shrink:0;display:grid;place-items:center;background:#1c1c1f;border:1px solid #2c313a}
+.brain-botdot i{width:11px;height:11px;display:block;background:var(--bc,#ffd60a)}
+.brain-watch{font-weight:800;font-size:14px;letter-spacing:-.01em}
+.brain-state{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--grey);letter-spacing:.04em}
+#brainAutoBtn{margin-left:auto;background:#141416;border:1px solid #2a2a2e;color:#ddd;padding:7px 12px;font-weight:600;font-size:12px;cursor:pointer;font-family:inherit}
+#brainAutoBtn:hover{border-color:var(--blue);color:#fff}
+#brainAutoBtn:disabled{opacity:.45;cursor:default}
+.brain-canvas-wrap{position:relative;background:#0a0c11;border:1px solid #23262c}
+#brainCanvas{display:block;width:100%;height:400px}
+@media(max-width:760px){#brainCanvas{height:280px}}
+.brain-caption{padding:8px 10px;font-family:"JetBrains Mono",monospace;font-size:11px;color:#9aa0ab;border-top:1px solid #23262c;line-height:1.5}
+.brain-feed{margin-top:12px;display:grid;gap:6px}
+.brain-feed-title{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.14em;color:var(--grey);text-transform:uppercase}
+.feed-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;background:#101216;border:1px solid #23262c;padding:8px 10px;font-size:12px;animation:feedIn .35s ease}
+@keyframes feedIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.feed-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;align-self:center}
+.feed-bot{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:11.5px}
+.feed-action{font-weight:800;color:#fff}
+.feed-probs{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#c9cdd6}
+.feed-ctx{color:var(--grey);font-size:11.5px}
+.feed-time{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10px;color:#6f757f;white-space:nowrap}
+.feed-empty{font-size:12px;color:var(--grey);border:1px dashed #2a2a2e;padding:10px}
+@media (prefers-reduced-motion: reduce){.feed-row{animation:none}}
+#botBubble .bb-pin{margin-top:7px;font-size:10.5px;color:#7db0ff;font-family:"JetBrains Mono",monospace;line-height:1.45}
+/* ============ VIEW TABS ============ */
+.view-tabs{display:flex;gap:0;border:1px solid #2a2a2e;background:#0d0d0f;padding:2px;flex-shrink:0}
+.view-tabs button{appearance:none;background:transparent;border:1px solid transparent;color:#c9c9cc;padding:7px 13px;font:600 12.5px Inter,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.view-tabs button.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.view-tabs button:not(.active):hover{color:#fff;border-color:#3a3a3e}
+.view-tabs .vt-dot{display:inline-block;width:6px;height:6px;background:#4ade80;border-radius:50%;margin-left:6px;vertical-align:middle}
+@media(max-width:760px){.view-tabs button{padding:6px 9px;font-size:11.5px}}
+/* ============ DECISION NETWORK TAB (full view overlay, site stays laid out underneath) ============ */
+body[data-view="network"]{overflow:hidden}
+body[data-view="network"] #swarm,body[data-view="network"] .hud,body[data-view="network"] #botBubble{display:none!important}
+#networkView{display:none}
+body[data-view="network"] #networkView{display:block;position:fixed;inset:0;z-index:45;overflow-y:auto;overflow-x:hidden;background:var(--bg);padding:92px 0 90px}
+@media(max-width:640px){body[data-view="network"] #networkView{padding-top:118px}}
+.net-wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+@media(max-width:640px){.net-wrap{padding:0 16px}}
+.net-head h2{margin-bottom:10px}
+.net-sub{color:var(--grey);max-width:680px;line-height:1.6;font-size:14.5px;margin:0 0 20px}
+.swarm-panel{border:1px solid var(--blue);background:rgba(47,123,255,.03);padding:14px}
+.swarm-canvas-wrap{position:relative;background:#08090d;border:1px solid #23262c;overflow:hidden}
+#swarmCanvas{display:block;width:100%;height:600px;cursor:pointer;touch-action:manipulation}
+@media(max-width:900px){#swarmCanvas{height:520px}}
+@media(max-width:560px){#swarmCanvas{height:460px}}
+.swarm-caption{padding:8px 10px;font-family:"JetBrains Mono",monospace;font-size:11px;color:#9aa0ab;border-top:1px solid #23262c;line-height:1.5}
+.net-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:18px;margin-top:18px;align-items:start}
+@media(max-width:900px){.net-grid{grid-template-columns:1fr}}
+.detail-strip{border:1px solid #2c313a;background:#0d0f13;padding:14px}
+.detail-strip h5{margin:0 0 8px;font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--grey)}
+.detail-main{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.detail-job{color:#c9cdd6;font-size:12.5px;margin-top:3px;line-height:1.5}
+#clearSelBtn{margin-left:auto;background:#141416;border:1px solid #2a2a2e;color:#ddd;padding:7px 12px;font-weight:600;font-size:12px;cursor:pointer;font-family:inherit}
+#clearSelBtn:hover{border-color:var(--blue);color:#fff}
+.detail-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+@media(max-width:560px){.detail-cols{grid-template-columns:1fr}}
+.chip-row{display:flex;flex-wrap:wrap;gap:5px}
+.dchip{font-family:"JetBrains Mono",monospace;font-size:10px;border:1px solid #2a2e37;padding:4px 6px;color:#c9cdd6}
+.dchip b{color:#7db0ff}
+.tbar{display:grid;grid-template-columns:92px 1fr 34px;gap:6px;align-items:center;font-family:"JetBrains Mono",monospace;font-size:9.5px;color:#9aa0ab;margin-bottom:5px}
+.tbar i{height:5px;background:#23262c;display:block}.tbar i em{display:block;height:100%}
+.tbar b{color:#e6e8ec;text-align:right;font-weight:600}
+.abar{display:grid;grid-template-columns:92px 1fr 38px;gap:6px;align-items:center;font-size:11px;color:#c9cdd6;margin-bottom:5px}
+.abar i{height:7px;background:#23262c;display:block}.abar i em{display:block;height:100%;background:#3a4152}
+.abar.chosen{color:#fff;font-weight:700}.abar.chosen i em{background:var(--dc,#ffd60a)}
+.abar b{font-family:"JetBrains Mono",monospace;font-size:10px;text-align:right}
+.recent-row{font-size:11.5px;color:#c9cdd6;padding:5px 0;border-bottom:1px dashed #23262c;line-height:1.5}
+.recent-row b{color:#fff}
+.detail-empty{font-size:12px;color:var(--grey)}
+.net-feed{border:1px solid #2c313a;background:#0d0f13;padding:14px}
+.net-feed .brain-feed{margin-top:0}
+/* ============ CONTROL-ROOM LIVE BAR ============ */
+.net-livebar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px solid #2c313a;background:#0d0f13;padding:10px 14px;margin-bottom:14px}
+.net-livebar .nl-title{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,.9);animation:livePulse 1.6s ease-in-out infinite}
+@keyframes livePulse{0%,100%{opacity:1}50%{opacity:.35}}
+.net-livebar .nl-stats{margin-left:auto;display:flex;gap:16px;flex-wrap:wrap;font-family:"JetBrains Mono",monospace;font-size:11px;color:#9aa0ab}
+.net-livebar .nl-stats b{color:#7dd3fc;font-weight:700}
+@media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
+/* ============ MINI METRIC PANELS ============ */
+.metrics-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+@media(max-width:900px){.metrics-strip{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:420px){.metrics-strip{grid-template-columns:1fr 1fr;gap:8px}}
+.mpanel{border:1px solid #2c313a;background:#0d0f13;padding:11px 12px;min-width:0}
+.mpanel h6{margin:0 0 8px;font-family:"JetBrains Mono",monospace;font-size:9.5px;letter-spacing:.14em;color:var(--grey);text-transform:uppercase;font-weight:700}
+.mpanel .mp-big{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.mpanel .mp-sub{font-family:"JetBrains Mono",monospace;font-size:10px;color:#9aa0ab;margin-top:5px;line-height:1.5}
+#mpSpark{display:block;width:100%;height:28px;margin-top:8px;background:#0a0c11;border:1px solid #23262c}
+.mp-bar{display:grid;grid-template-columns:86px 1fr 36px;gap:6px;align-items:center;font-size:10.5px;color:#c9cdd6;margin-bottom:5px}
+.mp-bar i{height:6px;background:#23262c;display:block}.mp-bar i em{display:block;height:100%;background:#38bdf8}
+.mp-bar b{font-family:"JetBrains Mono",monospace;font-size:10px;text-align:right;color:#e6e8ec}
+.mp-crew{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.mp-crew div{background:#101216;border:1px solid #23262c;padding:7px 8px}
+.mp-crew b{font-size:17px;display:block;line-height:1.1}
+.mp-crew span{font-family:"JetBrains Mono",monospace;font-size:9px;color:#9aa0ab;letter-spacing:.06em;text-transform:uppercase}
+.mp-heat{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.mp-heat .heat-cell{aspect-ratio:1.35;border:1px solid #23262c;display:flex;align-items:center;justify-content:center;font-family:"JetBrains Mono",monospace;font-size:8.5px;color:#c9cdd6;text-align:center;padding:2px;line-height:1.25;transition:background-color .6s ease}
+@media(max-width:560px){.mp-bar{grid-template-columns:70px 1fr 32px}}
+</style>
+</head>
+<body>
+<div class="red-edge"></div>
+<canvas id="swarm" aria-hidden="true"></canvas>
+
+<header>
+  <div class="hwrap">
+    <a class="logo" href="#top"><span class="logo-mark"><i></i></span> Pixelforge</a>
+    <div class="view-tabs" role="tablist" aria-label="Views">
+      <button type="button" id="tabWebsite" role="tab" aria-selected="true" class="active">Website</button>
+      <button type="button" id="tabNetwork" role="tab" aria-selected="false">Decision Network<span class="vt-dot" aria-hidden="true"></span></button>
+    </div>
+    <nav aria-label="Main">
+      <a href="#systems">Systems</a>
+      <a href="#work">Work</a>
+      <a href="#process">Process</a>
+      <a href="#lab">Lab</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<div id="siteView">
+<main id="top" style="position:relative">
+  <!-- HERO -->
+  <section class="hero wrap build-section" id="heroSec" data-build-name="Hero">
+    <span class="build-tag">⬚ Unbuilt — bots incoming</span>
+    <div class="hero-top build-item"><span><span class="dot"></span> [ 000 ] &nbsp;LIVE BUILD — THE SWARM IS ON THE PAGE</span><span class="mono" style="letter-spacing:.08em">PIXELFORGE.DEV</span></div>
+    <div class="hero-center">
+      <div class="grey-sq build-item" aria-hidden="true"><span></span></div>
+      <h1 class="build-item" style="--scatter:-14px">Software,<br><span class="thin">built by</span><br><em>a swarm.</em></h1>
+      <p class="build-item">Pixelforge is a technical studio where a crew of small autonomous bots designs, assembles and maintains every system — including this page. Scroll, and watch them work.</p>
+      <div class="hero-meta build-item">
+        <span class="pill">Core crew: <b>&nbsp;5 bots</b></span>
+        <span class="pill">On call: <b>&nbsp;28</b></span>
+        <span class="pill" style="border-color:var(--blue);color:#fff">Built pixel by pixel ↓</span>
+      </div>
+    </div>
+    <p class="hint build-item">Scroll down slowly — the swarm flies to each section, builds it inside and out, then heads back to base. Hit Replay to tear it all down and build again. Tap a bot to meet it — double-tap sends it to work.</p>
+  </section>
+
+  <!-- SYSTEMS -->
+  <section class="sec wrap build-section" id="systems" data-build-name="Systems">
+    <span class="build-tag">⬚ Unbuilt — bots incoming</span>
+    <div class="label build-item">[ 001 ] &nbsp; Systems</div>
+    <h2 class="build-item" style="--scatter:12px">Technical depth<br>is the product.</h2>
+    <p class="build-item" style="color:var(--grey);max-width:560px;line-height:1.6;font-size:14.5px;margin:0 0 24px">Two halves of the studio: the crews that build, and the infrastructure they build on.</p>
+    <div class="grid2">
+      <article class="blue-box build-item" data-box style="--scatter:-16px;--rot:-.6deg">
+        <div class="num">A — CREWS</div>
+        <h3 style="margin-top:10px">Agent orchestration</h3>
+        <p>Multi-bot crews with roles, hand-offs and a shared build queue. Each bot carries its own traits and decides where it is useful next.</p>
+        <div class="tags"><span>Crew dispatch</span><span>Decision engine</span><span>Build queue</span></div>
+      </article>
+      <article class="blue-box red-box build-item" data-box style="--scatter:16px;--rot:.6deg">
+        <div class="num">B — PLATFORM</div>
+        <h3 style="margin-top:10px">Infrastructure &amp; delivery</h3>
+        <p>Self-hosted services, local model runtimes and deployment pipelines that a patrol bot can inspect, patch and re-verify around the clock.</p>
+        <div class="tags"><span>Docker fleets</span><span>Local LLMs</span><span>CI pipelines</span></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- PRINCIPLES -->
+  <section class="sec wrap build-section" id="principles" data-build-name="Principles">
+    <span class="build-tag">⬚ Unbuilt — bots incoming</span>
+    <div class="label build-item">[ 001·5 ] &nbsp; Principles</div>
+    <h2 class="build-item" style="--scatter:-10px">We build systems,<br>not just software.</h2>
+    <div class="grid2" style="margin-top:22px">
+      <article class="blue-box build-item" data-box style="--scatter:-14px">
+        <div class="num">01 / DETERMINISM</div>
+        <h3 style="margin-top:10px">Deterministic where it counts</h3>
+        <p>Code owns the workflow: queues, state machines and tests. Models only supply judgment where rules run out.</p>
+      </article>
+      <article class="blue-box build-item" data-box style="--scatter:14px">
+        <div class="num">02 / JUDGMENT</div>
+        <h3 style="margin-top:10px">Judgment where it helps</h3>
+        <p>A decision layer scores every fork — join, move on, or stay and polish — with calibrated probabilities instead of vibes.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- WORK -->
+  <section class="sec wrap build-section" id="work" data-build-name="Work — Swarm Console">
+    <span class="build-tag">⬚ Unbuilt — bots incoming</span>
+    <div class="label build-item">[ 002 ] &nbsp; Selected Work</div>
+    <div class="work-head build-item">
+      <div>
+        <h2 style="margin-bottom:6px">Swarm<br>Console</h2>
+        <p style="color:var(--grey);font-size:14px;line-height:1.6;max-width:520px;margin:0">A live operations console for agent crews: who is building, who is tweaking, who went home — rendered as it happens.</p>
+      </div>
+      <div class="mono" style="font-size:11px;color:var(--grey);text-align:right;line-height:1.8">SELECTED WORK<br><span style="color:#fff">2026 — RUNNING LIVE</span></div>
+    </div>
+
+    <div class="proj-tabs build-item" role="tablist" aria-label="Projects">
+      <button class="active" data-proj="console">Swarm Console</button>
+      <button data-proj="shelf">Model Shelf</button>
+      <button data-proj="observatory">Pipeline Observatory</button>
+    </div>
+
+    <div class="mock build-item" id="mockBox" style="--scatter:0px">
+      <div class="mock-bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span id="mockTitle" style="margin-left:8px">SWARM CONSOLE — LIVE</span><span style="margin-left:auto" class="mono">● LIVE FEED</span></div>
+      <div class="mock-body">
+        <aside class="mock-side"><div class="side-item"><b>CREW</b><span>9 building now</span></div><div class="side-item"><b>QUEUE</b><span>14 pieces waiting</span></div><div class="side-item"><b>DECISIONS</b><span>1,284 logged</span></div><div class="side-item"><b>PATROL</b><span>3 on older work</span></div></aside>
+        <div class="mock-main">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+            <strong id="mockHeading" style="font-size:14px">Crew status — click a bot tile to inspect it</strong>
+            <span class="mono" style="font-size:11px;color:#94a3b8" id="mockStatus">32 TILES · LIVE</span>
+          </div>
+          <div class="tooth-grid" id="toothGrid" aria-label="Interactive swarm console bot tiles"></div>
+          <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div style="background:#0f172a;border:1px solid #334155;padding:12px;border-radius:6px"><div style="font-size:11px;letter-spacing:.1em;color:#94a3b8">SELECTED BOT</div><div id="selectedTooth" style="font-weight:700;margin-top:4px">Bot B-01 — Core crew · Building: Checkout flow</div><div style="color:#94a3b8;font-size:12.5px;margin-top:4px">Now building: Checkout flow. Click any tile to inspect another bot.</div></div>
+            <div style="background:#0f172a;border:1px solid var(--blue);padding:12px;border-radius:6px"><div style="font-size:11px;letter-spacing:.1em;color:#7db0ff">CONSOLE VITALS</div><div style="font-size:12.5px;color:#cbd5e1;margin-top:6px;line-height:1.6" id="agentNote">Decisions logged: 1,284 · Uptime: 99.98%. The crew assembled this console tile by tile.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mock-caption build-item"><span>Live console mockup — slate panel, blue selection outlines &amp; handles, one tile per bot.</span><span class="mono" id="projCaption">PROJECT 01 / 03</span></div>
+
+    <div class="grid2" style="margin-top:26px">
+      <article class="blue-box build-item" data-box style="--scatter:-14px">
+        <div class="num">PROJECT 02 — RUNTIME</div>
+        <h3 style="margin-top:10px">Model Shelf</h3>
+        <p>A local LLM router that keeps one model resident at a time and swaps on demand — 11 models, zero cloud calls.</p>
+        <div class="tags"><span>llama.cpp</span><span>Router</span><span>Offline-first</span></div>
+      </article>
+      <article class="blue-box build-item" data-box style="--scatter:14px">
+        <div class="num">PROJECT 03 — PIPELINES</div>
+        <h3 style="margin-top:10px">Pipeline Observatory</h3>
+        <p>Ingest pipelines drawn as living diagrams: every stage pulses with real throughput, and stuck stages get a bot dispatched to them.</p>
+        <div class="tags"><span>Streaming</span><span>Observability</span><span>Auto-dispatch</span></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- PROCESS -->
+  <section class="sec wrap build-section" id="process" data-build-name="Process">
+    <span class="build-tag">⬚ Unbuilt — bots incoming</span>
+    <div class="label build-item">[ 003 ] &nbsp; Process</div>
+    <div class="prod-layout" style="margin-top:8px">
+      <div class="build-item" style="--scatter:-12px">
+        <h2>Proof lives<br>in what we run.</h2>
+        <p style="color:var(--grey);line-height:1.65;font-size:14.5px;max-width:520px">Not slide decks. Working systems, in production, maintained by the same swarm that built them — the process below is literally what the bots on this page are doing right now.</p>
+        <div class="stat-row">
+          <div class="stat"><b>5</b><span>Core crew bots</span></div>
+          <div class="stat"><b>28</b><span>Bots on call</span></div>
+          <div class="stat"><b>1,284</b><span>Decisions logged</span></div>
+        </div>
+      </div>
+      <article class="blue-box build-item" data-box style="--scatter:14px">
+        <div class="num">HOW A BUILD RUNS</div>
+        <h3 style="margin-top:10px">Four stages, no theatre</h3>
+        <ul style="color:#d8d8da;font-size:13.5px;line-height:1.75;padding-left:18px;margin:12px 0 0">
+          <li><strong>01 Scout</strong> — bots survey the spec and split it into buildable pieces.</li>
+          <li><strong>02 Assemble</strong> — the core crew of five builds; big pieces call up reinforcements.</li>
+          <li><strong>03 Polish</strong> — perfectionists stay behind and tweak what is already done.</li>
+          <li><strong>04 Patrol</strong> — finished systems are revisited forever: pixels checked, letters straightened, colours kept honest.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- LAB -->
+  <section class="sec wrap build-section" id="lab" data-build-name="Lab">
+    <span class="build-tag">⬚ Unbuilt — bots incoming</span>
+    <div class="label build-item">[ 004 ] &nbsp; Lab</div>
+    <h2 class="build-item" style="--scatter:-10px">From the lab.</h2>
+    <p class="build-item" style="color:var(--grey);max-width:560px;line-height:1.6;font-size:14.5px;margin:0 0 24px">The engines behind this page, documented like everything else we ship.</p>
+    <div class="grid3">
+      <article class="blue-box build-item" data-box style="--scatter:-14px">
+        <div class="num">LAB 01 — PARTICLES</div>
+        <h3 style="margin-top:10px">Stardust Engine</h3>
+        <p>The particle system you are looking at: square pixels, shed at speed, capped for phones.</p>
+      </article>
+      <article class="blue-box build-item" data-box style="--scatter:0px">
+        <div class="num">LAB 02 — BEHAVIOUR</div>
+        <h3 style="margin-top:10px">Decision Sandbox</h3>
+        <p>Trait-driven bot personalities — perfectionism, energy, curiosity — tuned until crews feel alive, not scripted.</p>
+      </article>
+      <article class="blue-box build-item" data-box style="--scatter:14px">
+        <div class="num">LAB 03 — RENDERING</div>
+        <h3 style="margin-top:10px">Pixel Assembler</h3>
+        <p>DOM components materialised block by block along a jittered front. No fades. Everything earned.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section class="sec wrap build-section" id="contact" data-build-name="Contact" style="border-bottom:0">
+    <span class="build-tag">⬚ Unbuilt — bots incoming</span>
+    <div class="label build-item">[ 005 ] &nbsp; Contact</div>
+    <div class="contact-grid" style="margin-top:8px">
+      <div class="build-item" style="--scatter:-12px">
+        <h2>Have a difficult<br>system to<br>think through?</h2>
+        <p style="color:var(--grey);line-height:1.65;font-size:14.5px;max-width:480px">Bring us the problem with too many moving parts. The swarm will take it apart — pixel by pixel.</p>
+        <p class="mono" style="font-size:11px;color:var(--grey2);letter-spacing:.08em;margin-top:20px">REPLIES FROM A HUMAN · THE BOTS JUST BUILD</p>
+      </div>
+      <div class="white-card build-item" style="--scatter:14px">
+        <div class="mono" style="font-size:11px;letter-spacing:.14em;color:#888">START A CONVERSATION</div>
+        <h3 style="margin-top:8px">Email the studio</h3>
+        <a class="mail" href="mailto:hello@pixelforge.dev">hello@pixelforge.dev</a>
+        <div class="btn-row">
+          <a class="btn dark" href="mailto:hello@pixelforge.dev">✉ &nbsp;Send email</a>
+          <a class="btn light" href="https://github.com/pixelforge" target="_blank" rel="noopener">Follow the build on GitHub -&gt;</a>
+        </div>
+        <p style="color:#666;font-size:12.5px;line-height:1.6;margin:16px 0 0">GitHub &amp; Instagram: <strong style="color:#111">@pixelforge</strong></p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="build-section" id="siteFooter" data-build-name="Footer">
+  <span class="build-tag" style="right:28px">⬚ Unbuilt — bots incoming</span>
+  <div class="wrap">
+    <div class="foot">
+      <div class="build-item" style="--scatter:-10px">
+        <a class="logo" href="#top" style="color:#fff"><span class="logo-mark"><i></i></span> Pixelforge</a>
+        <p style="max-width:340px;margin-top:14px">An independent technical studio for agent systems, infrastructure and interactive software.</p>
+        <p class="mono" style="font-size:11px;letter-spacing:.1em">EST. 2026 — BUILT LIVE BY THE SWARM</p>
+      </div>
+      <div class="build-item">
+        <h4>Work</h4>
+        <ul>
+          <li><a href="#work">Swarm Console</a></li>
+          <li><a href="#work">Model Shelf</a></li>
+          <li><a href="#work">Pipeline Observatory</a></li>
+        </ul>
+      </div>
+      <div class="build-item" style="--scatter:10px">
+        <h4>Contact &amp; Social</h4>
+        <ul>
+          <li><a href="mailto:hello@pixelforge.dev">hello@pixelforge.dev</a></li>
+          <li><a href="https://github.com/pixelforge" target="_blank" rel="noopener">GitHub — @pixelforge</a></li>
+          <li><a href="https://instagram.com/pixelforge" target="_blank" rel="noopener">Instagram — @pixelforge</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="copy build-item"><span>© 2026 Pixelforge — Built live by the swarm.</span><span>Systems · Work · Process · Lab · Contact</span></div>
+  </div>
+</footer>
+</div><!-- /#siteView -->
+
+<!-- ================= DECISION NETWORK TAB ================= -->
+<div id="networkView" aria-label="Decision Network">
+  <div class="net-wrap">
+    <div class="label">[ 006 ] &nbsp; Decision Network</div>
+    <div class="net-head"><h2>Every bot. Every<br>decision. Live.</h2></div>
+    <p class="net-sub">Not a trained neural network — a live map of the swarm's real decision engine. Each firing below is an actual decision a bot just made: the bot flashes, its chosen action lights up with the probability it won with, then the pulse lands on the component that bot is working on. Tap any bot node to inspect it.</p>
+    <div class="net-livebar" role="status" aria-label="Decision network live status">
+      <span class="nl-title"><span class="live-dot" aria-hidden="true"></span>DECISION NETWORK — LIVE</span>
+      <span class="nl-stats"><span>SESSION <b id="nlElapsed">00:00</b></span><span>RENDER <b id="nlFps">— FPS</b></span><span id="nlCounts">BOTS — · DECISIONS 0</span></span>
+    </div>
+    <div class="swarm-panel">
+      <div class="brain-head">
+        <span class="brain-botdot" id="brainBotDot" aria-hidden="true"><i></i></span>
+        <span class="brain-watch" id="brainWatch">Watching: —</span>
+        <span class="brain-state" id="brainState">Auto-following latest decision</span>
+        <span class="brain-state" id="netLiveState">● LIVE — decisions fire here in real time</span>
+      </div>
+      <div class="swarm-canvas-wrap">
+        <canvas id="swarmCanvas" aria-label="Swarm decision network: bots on the left, actions in the middle, components on the right"></canvas>
+        <div class="swarm-caption" id="swarmCaption">Waiting for the first decision… build something on the Website tab and watch it fire here.</div>
+      </div>
+      <div class="brain-caption" id="brainCaption" style="border:1px solid #23262c;border-top:0;background:#0a0c11">Waiting for the first decision…</div>
+    </div>
+    <div class="metrics-strip" aria-label="Swarm metrics">
+      <div class="mpanel"><h6>01 / Decisions per min</h6><div class="mp-big" id="mpPerMin">0</div><div class="mp-sub">trailing 60s · per-10s buckets below</div><canvas id="mpSpark" width="260" height="28" aria-hidden="true"></canvas></div>
+      <div class="mpanel"><h6>02 / Decisions total</h6><div class="mp-big" id="mpTotal">0</div><div class="mp-sub" id="mpFeedCount">0 events in the feed buffer</div></div>
+      <div class="mpanel"><h6>03 / Action mix</h6><div id="mpActionMix"><div class="mp-sub">— no decisions yet</div></div></div>
+      <div class="mpanel"><h6>04 / Swarm traits</h6><div id="mpTraits"></div></div>
+      <div class="mpanel"><h6>05 / Crew state</h6><div class="mp-crew" id="mpCrew"></div></div>
+      <div class="mpanel"><h6>06 / Patrol coverage</h6><div class="mp-heat" id="mpCoverage"></div><div class="mp-sub">brighter = serviced recently / often</div></div>
+    </div>
+    <div class="net-grid">
+      <div class="detail-strip" id="detailStrip">
+        <div class="detail-main">
+          <div>
+            <div style="font-weight:800;font-size:15px" id="detailTitle">No bot selected</div>
+            <div class="detail-job" id="detailJob">Showing the most recent decision-maker. Tap a bot — here or on the Website tab — to pin it.</div>
+          </div>
+          <button id="clearSelBtn" type="button">Clear selection</button>
+          <button id="brainAutoBtn" type="button" disabled style="display:none">Auto-follow</button>
+        </div>
+        <div class="detail-cols">
+          <div><h5>Last decision — inputs</h5><div id="detailInputs"><span class="detail-empty">No decision yet.</span></div></div>
+          <div><h5>Traits · activation in that decision</h5><div id="detailTraits"><span class="detail-empty">—</span></div></div>
+          <div><h5>Action probabilities</h5><div id="detailActions"><span class="detail-empty">—</span></div></div>
+          <div><h5>Recent decisions by this bot</h5><div id="detailRecent"><span class="detail-empty">—</span></div></div>
+        </div>
+      </div>
+      <div class="net-feed">
+        <div class="brain-feed">
+          <div class="brain-feed-title">Decision feed — all bots, live</div>
+          <div id="brainFeedList"><div class="feed-empty" id="brainFeedEmpty">No decisions yet — scroll to a build on the Website tab and the feed fills with real events.</div></div>
+        </div>
+      </div>
+    </div>
+    <p style="color:var(--grey2);font-size:12px;margin-top:18px">Tip: builds keep running while you are on this tab. Switch back to Website any time — build progress, the decision log and your selected bot are all preserved.</p>
+  </div>
+</div>
+
+<!-- Bot pop-up: STATIC — appears near the tap, never moves, never auto-dismisses -->
+<div id="botBubble" role="status" aria-live="polite" aria-label="Bot details"></div>
+
+<!-- HUD -->
+<div class="hud" role="status" aria-label="Bot builder status">
+  <span class="hud-bot" aria-hidden="true">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="6" stroke="#fff" stroke-width="1.6"/><circle cx="12" cy="2" r="1.6" fill="#ffd60a"/><rect x="4" y="6" width="16" height="13" rx="4" fill="#fff"/><rect x="2" y="10" width="2.5" height="5" rx="1" fill="#2dd4bf"/><rect x="19.5" y="10" width="2.5" height="5" rx="1" fill="#ff6b9d"/><circle cx="9" cy="11.5" r="1.6" fill="#0b0b0d"/><circle cx="15" cy="11.5" r="1.6" fill="#0b0b0d"/><path d="M9 15.2 Q12 17.4 15 15.2" stroke="#0b0b0d" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+  </span>
+  <span class="hud-text"><span id="hudMain">Swarm build</span> <span class="hud-sec" id="hudSection">· Ready — scroll to build</span></span>
+  <span class="hud-bar"><i id="hudBar"></i></span>
+  <span class="mono" id="hudPct" style="font-size:11px;color:#888;width:34px;text-align:right">0%</span>
+  <span class="mono" id="hudCrew" style="font-size:11px;color:#ffd60a;white-space:nowrap" aria-label="Live crew state"></span>
+  <button id="replayBtn" type="button">↻ Replay</button>
+</div>
+
+<script>
+(function(){
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function wait(ms){ return new Promise(function(r){ setTimeout(r, reduced?0:ms); }); }
+
+  /* ---------- Teeth (generated before build init so they start unbuilt) ---------- */
+  var names=["Core crew · Building: Checkout flow", "Core crew · Assembling: Console grid", "Core crew · Wiring: Build queue", "Core crew · Placing: Pixel front", "Core crew · Checking: Decision log", "Reinforcement · Flying in from base", "Reinforcement · Assembling: Sidebar", "Reinforcement · Patching: Tile B-14", "Tweaker · Polishing: Hero heading", "Tweaker · Straightening letters", "Patrol · Inspecting: Systems cards", "Patrol · Recolouring a pixel patch", "Builder · Assembling: Process box", "Builder · Placing: Lab cards", "Builder · Wiring: Contact card", "Builder · Queued: Next section", "Scout · Surveying the spec", "Scout · Splitting work into pieces", "Builder · Assembling: Footer links", "Tweaker · Polishing: Work mockup", "Patrol · Inspecting: Older containers", "Builder · On standby at BOT BASE", "Builder · Carrying pixels to the front", "Decision watch · Scoring the next fork", "Builder · Assembling: Stat row", "Tweaker · Nudging a tile back in", "Patrol · Verifying: Uptime checks", "Builder · Assembling: Chips, one by one", "Scout · Mapping the page", "Builder · Returning to base", "Tweaker · Final polish pass", "Patrol · Night shift: Systems watch"];
+  var fdi=["B-01", "B-02", "B-03", "B-04", "B-05", "B-06", "B-07", "B-08", "B-09", "B-10", "B-11", "B-12", "B-13", "B-14", "B-15", "B-16", "B-17", "B-18", "B-19", "B-20", "B-21", "B-22", "B-23", "B-24", "B-25", "B-26", "B-27", "B-28", "B-29", "B-30", "B-31", "B-32"];
+  var grid=document.getElementById('toothGrid');
+  var selLabel=document.getElementById('selectedTooth');
+  var note=document.getElementById('agentNote');
+  var notes=["Selection moved — the console nudged the blue handles to the active bot.","Tile updated. A couple of bots double-checked this one.","Logged in the decision record: 1,284 and counting.","Bot inspected. Try a few tiles in a row — the console tracks each click."];
+  fdi.forEach(function(code,i){
+    var d=document.createElement('button');
+    d.className='tooth'+(i===0?' sel-tooth':'');
+    d.type='button'; d.title='Bot '+code; d.setAttribute('aria-label','Select bot tile '+code);
+    d.style.cursor='pointer'; d.style.padding='0';
+    d.style.setProperty('--d',(i*30)+'ms');
+    d.innerHTML='<span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:9px;font-weight:700;color:#475569">'+code+'</span>';
+    d.addEventListener('click',function(){
+      grid.querySelectorAll('.tooth').forEach(function(t){t.classList.remove('sel-tooth')});
+      d.classList.add('sel-tooth');
+      selLabel.textContent='Bot '+code+' — '+names[i];
+      note.textContent=notes[Math.floor(Math.random()*notes.length)];
+      var r=d.getBoundingClientRect(); burstAt(r.left+r.width/2, r.top+r.height/2);
+    });
+    grid.appendChild(d);
+  });
+
+  /* ---------- Project tabs ---------- */
+  var projData={
+    console:{title:'SWARM CONSOLE — LIVE',heading:'Crew status — click a bot tile to inspect it',status:'32 TILES · LIVE',cap:'PROJECT 01 / 03'},
+    shelf:{title:'Model Shelf — Local LLM router',heading:'Model Shelf — 11 models, one resident at a time',status:'llama.cpp · OFFLINE-FIRST',cap:'PROJECT 02 / 03'},
+    observatory:{title:'Pipeline Observatory — Living pipeline diagrams',heading:'Pipeline Observatory — throughput, live',status:'STREAMING · AUTO-DISPATCH',cap:'PROJECT 03 / 03'}
+  };
+  document.querySelectorAll('[data-proj]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      document.querySelectorAll('[data-proj]').forEach(function(b){b.classList.remove('active')});
+      btn.classList.add('active');
+      var d=projData[btn.getAttribute('data-proj')];
+      document.getElementById('mockTitle').textContent=d.title;
+      document.getElementById('mockHeading').textContent=d.heading;
+      document.getElementById('mockStatus').textContent=d.status;
+      document.getElementById('projCaption').textContent=d.cap;
+      var mb=document.getElementById('mockBox').getBoundingClientRect();
+      burstAt(mb.left+mb.width/2, mb.top+80);
+    });
+  });
+
+  /* ---------- Bot swarm (canvas) ---------- */
+  var canvas=document.getElementById('swarm'), ctx=canvas.getContext('2d');
+  var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  function resize(){ W=window.innerWidth; H=window.innerHeight; canvas.width=W*DPR; canvas.height=H*DPR; canvas.style.width=W+'px'; canvas.style.height=H+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
+  resize(); window.addEventListener('resize',function(){ resize(); if(typeof randomizeHome==='function' && bots.length) randomizeHome(); });
+
+  var COLORS=['#ffffff','#ffd60a','#ff6b9d','#2dd4bf','#4ade80','#ff7a1a'];
+  var BOT_COUNT = (window.innerWidth<640?22:28);
+  var bots=[], raf=null;
+  var focusEl=null;           // element currently being built (DOM element) or null
+  var burstPoint=null, burstUntil=0;
+  var buildFront=null; // {el, fx, fy} — the live pixel-build frontier the crew works on
+  var sparks=[];       // sparkle flashes on freshly placed pixels
+  var dust=[];         // PIXEL STARDUST: square particles shed by moving bots (cap ~200)
+  var tints=[];        // lingering recolored pixel patches left by micro-jobs on built containers
+  var mouse={x:innerWidth/2,y:innerHeight/3,seen:0};
+  window.addEventListener('pointermove',function(e){mouse.x=e.clientX;mouse.y=e.clientY;mouse.seen=Date.now();},{passive:true});
+  var scrollYPos=window.scrollY||0;
+  window.addEventListener('scroll',function(){scrollYPos=window.scrollY||0;},{passive:true});
+
+  /* ---- Home base: a loose staging cluster near the top-right of the viewport ---- */
+  var swarmMode='home'; // 'home' | 'building' | 'returning'
+  function homeCenter(){
+    return { x: Math.max(W-118, W*0.72), y: 118 };
+  }
+  function randomizeHome(){
+    var c=homeCenter();
+    bots.forEach(function(b,i){
+      // loose, irregular cluster — re-randomised every time the swarm comes home,
+      // so the parked formation never looks the same twice
+      var ang=Math.random()*Math.PI*2;
+      var rad=8+Math.pow(Math.random(),0.7)*78;
+      b.homeX=c.x+Math.cos(ang)*rad*1.25;
+      b.homeY=c.y+Math.sin(ang)*rad*0.72;
+      b.homeJitterX=(Math.random()-0.5)*14;
+      b.homeJitterY=(Math.random()-0.5)*10;
+      b.homeBobSpeed=0.0009+Math.random()*0.0014;
+      b.homeBobAmp=2+Math.random()*4;
+    });
+  }
+  /* Persistent per-bot personalities — generated once, kept across Replay so
+     each bot behaves consistently for the whole session. */
+  var botTraits=[];
+  function traitsFor(i){
+    if(!botTraits[i]) botTraits[i]={ perfectionism:Math.random(), energy:Math.random(), curiosity:Math.random() };
+    return botTraits[i];
+  }
+  function makeBots(){
+    bots=[];
+    for(var i=0;i<BOT_COUNT;i++){
+      var tr=traitsFor(i);
+      // random spawn: some start near home, others scattered — different every load/replay
+      var nearHome=Math.random()<0.55;
+      var c=homeCenter();
+      var sx= nearHome? c.x+(Math.random()-0.5)*260 : Math.random()*Math.max(W,320);
+      var sy= nearHome? c.y+(Math.random()-0.5)*180 : Math.random()*Math.max(H,320);
+      bots.push({
+        x: sx, y: sy,
+        tx: sx, ty: sy,
+        color: COLORS[Math.floor(Math.random()*COLORS.length)],
+        size: 16+Math.random()*7,
+        speed: .65+Math.random()*1.05,
+        crew: i<5,
+        /* Jev-decision traits + crew state */
+        perfectionism: tr.perfectionism, energy: tr.energy, curiosity: tr.curiosity,
+        mode: 'base', /* 'base' | 'building' | 'tweaking' */
+        tweakEl: null, tweakFx: null, tweakStart: 0, tweakUntil: 0, tweakNextCheck: 0,
+        phase: Math.random()*Math.PI*2,
+        blinkOffset: Math.random()*3400,
+        // per-bot randomness for paths & working motion — regenerated per target
+        arc: (Math.random()-0.5)*1.6,
+        arcFreq: 0.0012+Math.random()*0.0022,
+        orbitSpeed: 0.0012+Math.random()*0.0026,
+        orbitRadius: 4+Math.random()*11,
+        orbitDir: Math.random()<0.5?-1:1,
+        slotIdx: i,
+        slotJitterX: 0, slotJitterY: 0,
+        workJiggle: 0.6+Math.random()*1.6,
+        /* smooth-glide velocity + persistent per-bot work offsets, so a bot's
+           station and pace stay stable from step to step (no re-rolled darting) */
+        vx: 0, vy: 0, frontOff: Math.random(),
+        /* patrol duty on already-built containers */
+        patrolEl: null, patrolUntil: 0, fixFx: null, _standbyAt: 0,
+        idleTx: 0, idleTy: 0, idleAt: 0,
+        homeX: c.x, homeY: c.y, homeJitterX:0, homeJitterY:0, homeBobSpeed:0.0014, homeBobAmp:3,
+        trail: [], dustAcc: 0, micro: null, microNextAt: 0,
+        /* tap interaction state */
+        trick: null, react: null, boostUntil: 0, tapTimes: [], dispatchEl: null, lastDecision: null
+      });
+    }
+    randomizeHome();
+    // bots start parked at home
+    bots.forEach(function(b){ b.x=b.homeX+(Math.random()-0.5)*120; b.y=b.homeY+(Math.random()-0.5)*80; });
+  }
+  function pickIdle(b,now){
+    // small random drift *around home only* — the swarm no longer wanders the whole page
+    var c=homeCenter();
+    b.idleTx = c.x+(Math.random()-0.5)*190;
+    b.idleTy = c.y+(Math.random()-0.5)*110;
+    b.idleAt = now+2400+Math.random()*3200;
+  }
+  /* =====================================================================
+     Jev-STYLE DECISION ENGINE (local, Jev-shaped contract)
+     ---------------------------------------------------------------------
+     This is the decision point where a real TypeSafe/Jev `Choice` call
+     would slot in: given a bot + a state snapshot, it returns a
+     probability distribution over the Choice options
+       [ join · move_on · stay_tweak · return_base ]
+     plus one sampled action. Today the distribution is computed locally
+     from the bot's persistent traits (perfectionism / energy / curiosity);
+     swapping in a live Jev Choice call later means replacing only the
+     body of jevDecide() — callers already consume { probs, action }.
+     Decisions run ONLY at element boundaries (a sub-step starting or
+     completing) and on a tweaker's ~1.2s re-decide timer — never per frame.
+     ===================================================================== */
+  var CORE_CREW=5;                 // the starting crew: bots 0..4
+  var crewIdxs=[];                 // indices of bots on the current element
+  var currentDesired=CORE_CREW;    // crew size the current element asked for
+  var builtEls=[];                 // finished pieces, oldest first — patrol/tweak targets
+  function clampP(v,a,b){ return Math.max(a,Math.min(b,v)); }
+  function sampleWeighted(w){
+    var keys=Object.keys(w), total=0, i;
+    for(i=0;i<keys.length;i++) total+=Math.max(0,w[keys[i]]);
+    if(total<=0) return keys[0];
+    var roll=Math.random()*total;
+    for(i=0;i<keys.length;i++){ roll-=Math.max(0,w[keys[i]]); if(roll<=0) return keys[i]; }
+    return keys[keys.length-1];
+  }
+  /* =====================================================================
+     DECISION NETWORK — real decision events only
+     ---------------------------------------------------------------------
+     Every jevDecide() call emits ONE event built from the exact numbers
+     that call used: the state snapshot (inputs, normalised 0–1), the
+     bot's traits, per-trait contributions and the full probability
+     distribution. Per-trait contribution derivation: for each action,
+     the terms of that action's weight that are multiplied by a trait
+     (e.g. stay_tweak gets perfectionism × 1.50) are that trait's raw
+     contribution to that action; a trait's activation is its total
+     absolute contribution across actions as a share of all traits'
+     contributions in this decision. No separate/random system — if the
+     decision math changes, these numbers change with it. Pulses in the
+     Lab network fire ONLY from these events, never decoratively.
+     ===================================================================== */
+  var decisionLog=[];              // ring buffer, last ~30 events
+  var sessionDecisionCount=0;      // ALL decisions this session (never ring-trimmed)
+  var sessionActionCounts={ join:0, move_on:0, stay_tweak:0, return_base:0 };
+  var sessionDecisionTimes=[];     // timestamps of every session decision (per-min panel)
+  var serviceLog=[];               // {sec, ts} — patrol/tweaker service events (coverage panel)
+  var pageLoadTs=Date.now();
+  var renderFps=0, _fpsFrames=0, _fpsLast=performance.now();
+  function sectionKeyForEl(el){
+    var sec=el && el.closest ? el.closest('.build-section') : null;
+    return sec ? (sec.getAttribute('data-build-name')||sec.id) : null;
+  }
+  function logService(el){
+    var k=sectionKeyForEl(el); if(!k) return;
+    serviceLog.push({ sec:k, ts:Date.now() });
+    if(serviceLog.length>600) serviceLog.splice(0, serviceLog.length-600);
+  }
+  var pinnedBotIdx=-1;             // -1 = not pinned (auto-follow)
+  var watchedBotIdx=-1;            // bot the network panel is showing
+  var shownEvent=null;             // decision event currently drawn
+  var brainPulse=null;             // {event, start, dur} travelling pulse
+  var lastWatchSwitch=0, pendingWatch=null; // auto-follow throttle (~900ms)
+  var ACTION_KEYS=['join','move_on','stay_tweak','return_base'];
+  var ACTION_LABEL={ join:'Join', move_on:'Move on', stay_tweak:'Stay & tweak', return_base:'Return to base' };
+  var INPUT_DEFS=[['size','Element size'],['complete','% complete'],['nextWaiting','Next waiting'],['crewNeed','Crew need'],['distance','Distance']];
+  var TRAIT_DEFS=[['perfectionism','Perfectionism'],['energy','Energy'],['curiosity','Curiosity']];
+  // static relevance of each input to each trait — used only to weight the
+  // input->trait edges for display (brightness = input value x relevance)
+  var INPUT_TRAIT_REL={ size:{perfectionism:.3,energy:.2,curiosity:.8}, complete:{perfectionism:.9,energy:.2,curiosity:.1},
+    nextWaiting:{perfectionism:.4,energy:.8,curiosity:.3}, crewNeed:{perfectionism:.2,energy:.7,curiosity:.5}, distance:{perfectionism:.1,energy:.9,curiosity:.4} };
+  function phaseLabelFor(ph){ return ph==='join'?'joining':(ph==='complete'?'completing':'tweak re-decide'); }
+  function recordDecision(bot, st, probsIn, action){
+    var idx=(st.botIdx!=null?st.botIdx:bots.indexOf(bot));
+    if(idx<0) return null;
+    // full distribution over all four actions (unused actions = 0)
+    var probs={ join:0, move_on:0, stay_tweak:0, return_base:0 }, pk;
+    for(pk in probsIn) if(pk in probs) probs[pk]=probsIn[pk];
+    var tot=0; for(pk in probs) tot+=probs[pk];
+    if(tot>0) for(pk in probs) probs[pk]/=tot;
+    // ---- inputs: the actual state values this call used, normalised 0–1
+    var el=st.el||null, area=st.area||0;
+    var sizeN= area? clampP(area/220000,0.04,1) : (st.sizeClass==='large'?0.95:(st.sizeClass==='medium'?0.6:0.25));
+    var distN=0.5;
+    if(el){ var r0=el.getBoundingClientRect(); var dx0=(r0.left+r0.width/2)-bot.x, dy0=(r0.top+r0.height/2)-bot.y;
+      distN=clampP(Math.sqrt(dx0*dx0+dy0*dy0)/Math.max(600,Math.sqrt(W*W+H*H)),0,1); }
+    var inputs={ size:sizeN, complete:(st.completePct!=null?st.completePct:(st.phase==='join'?0:1)),
+      nextWaiting:st.nextWaiting?1:0, crewNeed:clampP((st.desired||currentDesired||CORE_CREW)/24,0,1), distance:distN };
+    // ---- per-trait raw contributions per action, from THIS call's weights
+    var traw={ perfectionism:{join:0,move_on:0,stay_tweak:0,return_base:0}, energy:{join:0,move_on:0,stay_tweak:0,return_base:0}, curiosity:{join:0,move_on:0,stay_tweak:0,return_base:0} };
+    var perf=bot.perfectionism, en=bot.energy, cur=bot.curiosity;
+    if(st.phase==='join'){
+      traw.energy.join=en*0.38; traw.curiosity.join=cur*0.22+(st.sizeClass==='large'?cur*0.12:0);
+      traw.perfectionism.join=(st.sizeClass==='small'?perf*0.05:0);
+      traw.energy.return_base=(1-en)*0.25; traw.perfectionism.return_base=0; traw.curiosity.return_base=0;
+    } else if(st.phase==='complete'){
+      traw.perfectionism.stay_tweak=perf*1.50; traw.energy.stay_tweak=-en*0.10; traw.energy.move_on=en*0.60; traw.energy.return_base=-(en*0.25);
+    } else {
+      var ageF=1-((st.tweakAge||0)*0.50);
+      traw.perfectionism.stay_tweak=perf*1.20*ageF; traw.energy.move_on=en*0.45; traw.energy.return_base=-(en*0.22);
+    }
+    var rawSum={ perfectionism:0, energy:0, curiosity:0 }, rawTot=0;
+    TRAIT_DEFS.forEach(function(td){ ACTION_KEYS.forEach(function(a){ rawSum[td[0]]+=Math.abs(traw[td[0]][a]); }); rawTot+=rawSum[td[0]]; });
+    var traits={};
+    TRAIT_DEFS.forEach(function(td){ traits[td[0]]={ value:bot[td[0]], activation: rawTot>0? rawSum[td[0]]/rawTot : 0 }; });
+    // ---- context label
+    var elName='the current piece', secName='';
+    if(el){ try{ elName=describeEl(el); }catch(e){}
+      var sec=el.closest?el.closest('.build-section'):null; if(sec) secName=sec.getAttribute('data-build-name')||''; }
+    var compLabel=elName;
+    if(compLabel.length>44) compLabel=compLabel.slice(0,44)+'…';
+    var ev={ botIdx:idx, botId:botId(idx), color:bot.color, ts:Date.now(), phase:st.phase,
+      contextLabel:phaseLabelFor(st.phase)+': '+compLabel, componentLabel:compLabel, componentKey:compLabel,
+      inputs:inputs, traits:traits, traitRaw:traw, probs:probs, chosen:action, el:el };
+    bot.lastDecision=ev;
+    sessionDecisionCount++; sessionDecisionTimes.push(ev.ts);
+    if(action in sessionActionCounts) sessionActionCounts[action]++;
+    if(sessionDecisionTimes.length>4000) sessionDecisionTimes.splice(0, sessionDecisionTimes.length-4000);
+    decisionLog.push(ev); if(decisionLog.length>40) decisionLog.shift();
+    ensureComponent(compLabel, el);
+    pushSwarmPulse(ev);
+    addFeedRow(ev);
+    onDecisionForWatch(ev);
+    renderDetailStrip();
+    return ev;
+  }
+  function onDecisionForWatch(ev){
+    if(pinnedBotIdx>=0){
+      if(ev.botIdx===pinnedBotIdx){ shownEvent=ev; watchedBotIdx=ev.botIdx; startBrainPulse(ev); updateBrainHeader(); }
+      return;
+    }
+    // auto-follow: switch the watched bot, throttled to ~1 switch / 900ms
+    var now=performance.now();
+    if(watchedBotIdx===ev.botIdx){ shownEvent=ev; startBrainPulse(ev); updateBrainHeader(); return; }
+    if(now-lastWatchSwitch>=900){ watchedBotIdx=ev.botIdx; shownEvent=ev; lastWatchSwitch=now; pendingWatch=null; startBrainPulse(ev); updateBrainHeader(); }
+    else {
+      pendingWatch=ev;
+      if(!onDecisionForWatch._t) onDecisionForWatch._t=setTimeout(function(){
+        onDecisionForWatch._t=null;
+        if(pendingWatch && pinnedBotIdx<0){ var e2=pendingWatch; pendingWatch=null; watchedBotIdx=e2.botIdx; shownEvent=e2; lastWatchSwitch=performance.now(); startBrainPulse(e2); updateBrainHeader(); }
+      }, 920);
+    }
+  }
+  function startBrainPulse(ev){
+    if(reduced){ brainPulse=null; drawBrain(performance.now(), true); return; }
+    brainPulse={ event:ev, start:performance.now(), dur:820 };
+  }
+  function pinBot(idx){
+    pinnedBotIdx=idx; watchedBotIdx=idx; pendingWatch=null;
+    var b=bots[idx];
+    shownEvent=(b && b.lastDecision)? b.lastDecision : null;
+    brainPulse=null;
+    document.body.setAttribute('data-selected-bot', botId(idx));
+    updateBrainHeader(); renderDetailStrip();
+  }
+  function unpinBrain(){
+    pinnedBotIdx=-1;
+    document.body.removeAttribute('data-selected-bot');
+    var last=decisionLog[decisionLog.length-1];
+    if(last){ watchedBotIdx=last.botIdx; shownEvent=last; } else { watchedBotIdx=-1; shownEvent=null; }
+    updateBrainHeader(); renderDetailStrip();
+  }
+  function relTime(ts){
+    var s=Math.max(0,Math.round((Date.now()-ts)/1000));
+    return s<2?'just now':(s<60?s+'s ago':Math.floor(s/60)+'m ago');
+  }
+  /* =====================================================================
+     SWARM-LEVEL DECISION NETWORK (Decision Network TAB)
+     Bots (left) -> Actions (middle) -> Components (right).
+     Pulses fire ONLY from real decision events via pushSwarmPulse().
+     ===================================================================== */
+  var swarmPulses=[], swarmBotNodes=[], componentList=[], currentView='website';
+  var swarmCv2=null, swarmCx2=null, swarmLastDraw=0;
+  /* ---- Constellation ambience: precomputed starfield + neighbour mesh.
+     Positions are normalised (0..1); drift is a slow sinusoidal offset per
+     star (no force simulation), twinkle is a per-star phase. Pairs are
+     computed ONCE from initial positions. ---- */
+  var hubPulses=[];
+  var stars=null, starPairs=[], starCountBucket=0;
+  var STAR_COLORS=['#22d3ee','#38bdf8','#7dd3fc','#bae6fd','#ffffff','#67e8f9'];
+  function buildStarfield(cw){
+    var bucket= cw<640? 100 : 180;
+    if(stars && starCountBucket===bucket) return;
+    starCountBucket=bucket; stars=[];
+    for(var i=0;i<bucket;i++){
+      stars.push({ x:Math.random(), y:Math.random(),
+        r:(Math.random()<0.08? 2.2+Math.random()*1.4 : 0.7+Math.random()*1.6),
+        c:STAR_COLORS[Math.floor(Math.random()*STAR_COLORS.length)],
+        a:0.25+Math.random()*0.55, ph:Math.random()*Math.PI*2,
+        tw:0.4+Math.random()*1.1, dx:(Math.random()-0.5)*0.006, dy:(Math.random()-0.5)*0.004 });
+    }
+    starPairs=[];
+    for(var a=0;a<stars.length && starPairs.length<240;a++) for(var b=a+1;b<stars.length;b++){
+      var dx=stars[a].x-stars[b].x, dy=stars[a].y-stars[b].y;
+      if(dx*dx+dy*dy<0.016) starPairs.push([a,b,Math.random()*Math.PI*2]);
+      if(starPairs.length>=240) break;
+    }
+  }
+  function starPos(s, now, cw, ch){
+    if(reduced) return { x:s.x*cw, y:s.y*ch };
+    var t=now*0.001;
+    return { x:(s.x + Math.sin(t*0.05+s.ph)*s.dx*8)*cw, y:(s.y + Math.cos(t*0.04+s.ph)*s.dy*8)*ch };
+  }
+  function drawConstellation(g, cw, ch, now){
+    buildStarfield(cw);
+    var cache=stars.map(function(s){ return starPos(s, now, cw, ch); });
+    // neighbour mesh — very thin, very faint, alpha breathes slowly
+    g.lineWidth=0.5;
+    starPairs.forEach(function(p){
+      var al= reduced? 0.05 : 0.035+0.025*(0.5+0.5*Math.sin(now*0.0006+p[2]));
+      g.strokeStyle='rgba(103,232,249,'+al.toFixed(3)+')';
+      g.beginPath(); g.moveTo(cache[p[0]].x, cache[p[0]].y); g.lineTo(cache[p[1]].x, cache[p[1]].y); g.stroke();
+    });
+    // stars
+    stars.forEach(function(s,i){
+      var tw= reduced? 1 : 0.62+0.38*Math.sin(now*0.001*s.tw+s.ph);
+      g.globalAlpha=Math.max(0.05, s.a*tw);
+      g.fillStyle=s.c;
+      g.fillRect(cache[i].x-s.r/2, cache[i].y-s.r/2, s.r, s.r);
+      if(s.r>2){ g.globalAlpha*=0.35; g.fillRect(cache[i].x-s.r, cache[i].y-s.r, s.r*2, s.r*2); }
+    });
+    g.globalAlpha=1;
+    // ---- HUB at canvas centre, behind the action column ----
+    var hx=cw*0.52, hy=ch*0.5;
+    var breath= reduced? 1 : 1+0.10*Math.sin(now*0.001047); // ~6s period
+    var haloR=95*breath;
+    var grad=g.createRadialGradient(hx,hy,0,hx,hy,haloR);
+    grad.addColorStop(0,'rgba(165,243,252,0.20)'); grad.addColorStop(0.35,'rgba(34,211,238,0.08)'); grad.addColorStop(1,'rgba(34,211,238,0)');
+    g.fillStyle=grad; g.beginPath(); g.arc(hx,hy,haloR,0,7); g.fill();
+    // faint large orbit ring through the hub + horizontal scan line
+    g.strokeStyle='rgba(103,232,249,0.10)'; g.lineWidth=1;
+    g.beginPath(); g.ellipse(hx,hy,cw*0.30*breath,ch*0.37*breath,0,0,Math.PI*2); g.stroke();
+    g.strokeStyle='rgba(125,211,252,0.05)';
+    g.beginPath(); g.moveTo(0,hy); g.lineTo(cw,hy); g.stroke();
+    // glowing core
+    g.save(); g.shadowColor='rgba(165,243,252,.9)'; g.shadowBlur=reduced?0:16;
+    g.fillStyle='#ecfeff'; g.beginPath(); g.arc(hx,hy,5.2*breath,0,7); g.fill(); g.restore();
+    g.strokeStyle='rgba(165,243,252,0.5)'; g.beginPath(); g.arc(hx,hy,11*breath,0,7); g.stroke();
+    return { x:hx, y:hy };
+  }
+  function drawHubRadiation(g, L, hub, now){
+    if(reduced) return;
+    hubPulses=hubPulses.filter(function(hp){ return now-hp.start<1500; });
+    hubPulses.forEach(function(hp){
+      var pr=(now-hp.start)/1500; if(pr<0) return;
+      var ev=hp.ev;
+      // expanding faint ring
+      g.save(); g.globalAlpha=(1-pr)*0.22; g.strokeStyle='#67e8f9'; g.lineWidth=1.2;
+      g.beginPath(); g.arc(hub.x, hub.y, 14+pr*300, 0, 7); g.stroke(); g.restore();
+      // spokes toward the firing bot and its component brighten briefly
+      var bp=L.bots[ev.botIdx];
+      var ci=-1; L.comps.forEach(function(c,ix){ if(c.key===(ev.componentLabel||ev.contextLabel)) ci=ix; });
+      g.save(); g.globalAlpha=(1-pr)*(1-pr)*0.55; g.strokeStyle=ev.color; g.lineWidth=1.4;
+      if(bp){ g.beginPath(); g.moveTo(hub.x,hub.y); g.lineTo(bp.x,bp.y); g.stroke(); }
+      if(ci>=0){ g.beginPath(); g.moveTo(hub.x,hub.y); g.lineTo(L.comps[ci].x,L.comps[ci].y); g.stroke(); }
+      g.restore();
+    });
+  }
+  function ensureComponent(label, el){
+    if(!label) return;
+    var ex=null;
+    componentList.forEach(function(c){ if(c.key===label) ex=c; });
+    if(ex){ ex.lastSeen=Date.now(); if(el) ex.el=el; }
+    else componentList.unshift({ key:label, label:label, lastSeen:Date.now(), el:el||null });
+    componentList.sort(function(a,b){ return b.lastSeen-a.lastSeen; });
+    if(componentList.length>10) componentList.length=10;
+  }
+  function componentLabelForEl(el){
+    if(!el) return 'BOT BASE';
+    var d=''; try{ d=describeEl(el); }catch(e){ d=''; }
+    if(!d) d='the current piece';
+    return d.length>44? d.slice(0,44)+'…' : d;
+  }
+  function refreshComponents(){
+    if(focusEl) ensureComponent(componentLabelForEl(focusEl), focusEl);
+    bots.forEach(function(b){
+      var el = b.mode==='tweaking'? b.tweakEl : (b.mode==='patrol'? b.patrolEl : null);
+      if(el) ensureComponent(componentLabelForEl(el), el);
+    });
+    builtEls.slice(-5).forEach(function(el){ ensureComponent(componentLabelForEl(el), el); });
+    if(!componentList.length){
+      sections.forEach(function(sec){ ensureComponent(sec.getAttribute('data-build-name')||sec.id, sec); });
+    }
+  }
+  function pushSwarmPulse(ev, force){
+    if(!ev) return;
+    if(swarmPulses.length>=6){ if(force) swarmPulses.shift(); else return; }
+    ensureComponent(ev.componentLabel||ev.contextLabel, ev.el||null);
+    swarmPulses.push({ ev:ev, start:performance.now()+Math.random()*90, dur:1250 });
+    hubPulses.push({ ev:ev, start:performance.now() }); // constellation radiation from the hub
+    if(hubPulses.length>4) hubPulses.shift();
+  }
+  function replayRecentPulses(){
+    decisionLog.slice(-3).forEach(function(ev,i){
+      setTimeout(function(){ pushSwarmPulse(ev, true); }, 200+i*420);
+    });
+  }
+  function modeActionFor(b){
+    if(b.mode==='building') return 'join';
+    if(b.mode==='tweaking'||b.mode==='patrol') return 'stay_tweak';
+    if(b.mode==='helper'||b.mode==='standby') return 'move_on';
+    return 'return_base';
+  }
+  function botTargetLabel(b){
+    if(b.mode==='building'&&focusEl) return componentLabelForEl(focusEl);
+    if(b.mode==='tweaking'&&b.tweakEl) return componentLabelForEl(b.tweakEl);
+    if(b.mode==='patrol'&&b.patrolEl) return componentLabelForEl(b.patrolEl);
+    if(b.mode==='base') return 'BOT BASE';
+    return null;
+  }
+  function swarmLayout(w,h){
+    var n=bots.length||BOT_COUNT;
+    var cols = w<680? 3 : 2;
+    var rows=Math.ceil(n/cols);
+    var top=54, botY=h-26;
+    var botPts=[];
+    for(var i=0;i<n;i++){
+      var c=i%cols, r=Math.floor(i/cols);
+      var x=(w*0.035)+c*((w*0.27)/cols)+((w*0.27)/cols)/2;
+      var y= rows===1? (top+botY)/2 : top+(botY-top)*(rows===1?0.5:r/(rows-1));
+      botPts.push({x:x,y:y,idx:i});
+    }
+    var actPts=ACTION_KEYS.map(function(a,i){ return { x:w*0.52, y: h*0.20 + (h*0.60)*(i/(ACTION_KEYS.length-1)), key:a }; });
+    var comps=componentList.slice(0,10);
+    var compPts=comps.map(function(c,i){ return { x:w*0.85, y: comps.length===1? h/2 : top+(botY-top)*(i/(comps.length-1)), key:c.key, label:c.label }; });
+    return { bots:botPts, actions:actPts, comps:compPts };
+  }
+  function drawMiniBot(g,x,y,size,color,alpha){
+    g.save(); g.globalAlpha=alpha;
+    g.strokeStyle=color; g.lineWidth=1.2;
+    g.beginPath(); g.moveTo(x,y-size*0.42); g.lineTo(x,y-size*0.66); g.stroke();
+    g.beginPath(); g.arc(x,y-size*0.72,2,0,7); g.fillStyle=color; g.fill();
+    g.beginPath();
+    var hw=size, hh=size*0.84, bx=x-hw/2, by=y-hh/2, r=4;
+    g.moveTo(bx+r,by); g.arcTo(bx+hw,by,bx+hw,by+hh,r); g.arcTo(bx+hw,by+hh,bx,by+hh,r); g.arcTo(bx,by+hh,bx,by,r); g.arcTo(bx,by,bx+hw,by,r); g.closePath();
+    g.fillStyle=color; g.fill(); g.lineWidth=0.8; g.strokeStyle='rgba(0,0,0,.6)'; g.stroke();
+    g.fillStyle='#0b0b0d';
+    g.beginPath(); g.arc(x-size*0.22,y-1,1.7,0,7); g.arc(x+size*0.22,y-1,1.7,0,7); g.fill();
+    g.restore();
+  }
+  function drawSwarmNetwork(now){
+    if(currentView!=='network') return;
+    if(!swarmCv2){ swarmCv2=document.getElementById('swarmCanvas'); if(!swarmCv2) return; swarmCx2=swarmCv2.getContext('2d'); }
+    var hasPulse=swarmPulses.length>0;
+    if(!hasPulse && now-swarmLastDraw<50) return; // ~20fps ambient drift/twinkle
+    swarmLastDraw=now;
+    var wrap=swarmCv2.parentElement; if(!wrap) return;
+    var cw=wrap.clientWidth, ch=swarmCv2.clientHeight||520;
+    if(cw<40) return;
+    if(now-(drawSwarmNetwork._rc||0)>900){ drawSwarmNetwork._rc=now; refreshComponents(); }
+    var dpr=Math.min(window.devicePixelRatio||1,2);
+    if(swarmCv2.width!==Math.round(cw*dpr)||swarmCv2.height!==Math.round(ch*dpr)){ swarmCv2.width=Math.round(cw*dpr); swarmCv2.height=Math.round(ch*dpr); }
+    var g=swarmCx2; g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,cw,ch);
+    var hubPt=drawConstellation(g, cw, ch, now); // ambient layer UNDER the real network
+    var L=swarmLayout(cw,ch);
+    drawHubRadiation(g, L, hubPt, now);
+    swarmBotNodes=L.bots.map(function(pt){ return { idx:pt.idx, x:pt.x, y:pt.y, r:24 }; });
+    g.font='700 9px "JetBrains Mono", monospace'; g.textAlign='center';
+    g.fillStyle='rgba(154,160,171,.85)';
+    if(cw<640){ g.fillText('BOTS', cw*0.17, 24); g.fillText('ACTIONS', cw*0.52, 24); g.fillText('COMPONENTS', cw*0.85, 24); }
+    else { g.fillText('BOTS', cw*0.17, 24); g.fillText('ACTIONS — WHAT THEY CHOSE', cw*0.52, 24); g.fillText('COMPONENTS — WHAT THEY WORK ON', cw*0.85, 24); }
+    // resting edges: bot -> its current action, action -> its current component
+    var seenAC={};
+    bots.forEach(function(b,i){
+      if(b.mode==='base') return;
+      var bp=L.bots[i]; if(!bp) return;
+      var ak=modeActionFor(b), ai=ACTION_KEYS.indexOf(ak), ap=L.actions[ai];
+      g.strokeStyle='rgba(110,140,190,.13)'; g.lineWidth=1;
+      g.beginPath(); g.moveTo(bp.x+10,bp.y); g.lineTo(ap.x-16,ap.y); g.stroke();
+      var tl=botTargetLabel(b);
+      if(tl){
+        var ci=-1; L.comps.forEach(function(c,ix){ if(c.key===tl) ci=ix; });
+        if(ci>=0 && !seenAC[ak+':'+ci]){ seenAC[ak+':'+ci]=1;
+          g.strokeStyle='rgba(110,140,190,.10)';
+          g.beginPath(); g.moveTo(ap.x+16,ap.y); g.lineTo(L.comps[ci].x-70,L.comps[ci].y); g.stroke(); }
+      }
+    });
+    // pulses (real events only)
+    swarmPulses=swarmPulses.filter(function(pl){ return now-pl.start<pl.dur+120; });
+    var activeActionGlow={}, activeCompGlow={}, activeBotGlow={};
+    swarmPulses.forEach(function(pl){
+      var ev=pl.ev, pr=(now-pl.start)/pl.dur; if(pr<0||pr>1) return;
+      var bp=L.bots[ev.botIdx]; if(!bp) return;
+      var ai=ACTION_KEYS.indexOf(ev.chosen), ap=L.actions[ai]; if(!ap) return;
+      var ci=-1; L.comps.forEach(function(c,ix){ if(c.key===(ev.componentLabel||ev.contextLabel)) ci=ix; });
+      var cp= ci>=0? L.comps[ci] : null;
+      if(pr<0.18) activeBotGlow[ev.botIdx]=ev.color;
+      if(pr>0.30&&pr<0.72) activeActionGlow[ev.chosen]={ color:ev.color, prob:ev.probs[ev.chosen] };
+      if(cp&&pr>0.80) activeCompGlow[cp.key]=ev.color;
+      for(var s2=0;s2<3;s2++){
+        var pp=pr-s2*0.05; if(pp<0) continue;
+        var x,y;
+        if(pp<0.5){ var f=pp/0.5; x=bp.x+(ap.x-bp.x)*f; y=bp.y+(ap.y-bp.y)*f; }
+        else if(cp){ var f2=(pp-0.5)/0.5; x=ap.x+(cp.x-ap.x)*f2; y=ap.y+(cp.y-ap.y)*f2; }
+        else continue;
+        var sz=4.5-s2*1.1;
+        g.globalAlpha=0.95-s2*0.25; g.fillStyle= s2? ev.color : '#ffffff';
+        g.fillRect(x-sz/2,y-sz/2,sz,sz);
+      }
+      g.globalAlpha=1;
+    });
+    // bot nodes
+    L.bots.forEach(function(pt){
+      var b=bots[pt.idx]; if(!b) return;
+      var active=b.mode!=='base';
+      var glow=activeBotGlow[pt.idx];
+      if(pinnedBotIdx===pt.idx){
+        var pr2=17+Math.sin(now*0.005)*2.5;
+        g.save(); g.strokeStyle=b.color; g.globalAlpha=0.95; g.lineWidth=2;
+        g.beginPath(); g.arc(pt.x,pt.y,pr2,0,7); g.stroke(); g.restore();
+      } else if(glow){
+        g.save(); g.globalAlpha=0.4; g.fillStyle=glow; g.beginPath(); g.arc(pt.x,pt.y,19,0,7); g.fill(); g.restore();
+      }
+      drawMiniBot(g, pt.x, pt.y-3, 15, b.color, active?1:0.32);
+      g.fillStyle= active? '#e6e8ec' : 'rgba(154,160,171,.55)';
+      g.font='600 7.5px "JetBrains Mono", monospace';
+      g.fillText(botId(pt.idx), pt.x, pt.y+15);
+    });
+    // action nodes
+    L.actions.forEach(function(ap){
+      var glow=activeActionGlow[ap.key];
+      var lastProb=null;
+      for(var i=decisionLog.length-1;i>=0;i--){ if(decisionLog[i].chosen===ap.key){ lastProb=decisionLog[i].probs[ap.key]; break; } }
+      if(glow){ g.save(); g.globalAlpha=0.38; g.fillStyle=glow.color; g.beginPath(); g.arc(ap.x,ap.y,30,0,7); g.fill(); g.restore(); }
+      g.beginPath(); g.arc(ap.x,ap.y,19,0,7);
+      g.fillStyle= glow? glow.color : '#232936'; g.fill();
+      g.lineWidth=1.4; g.strokeStyle= glow? '#ffffff' : '#3a4152'; g.stroke();
+      g.fillStyle='#fff'; g.font='700 9.5px Inter, sans-serif';
+      g.fillText(ACTION_LABEL[ap.key], ap.x, ap.y-27);
+      g.fillStyle= glow? '#7db0ff' : 'rgba(201,205,214,.65)'; g.font='10px "JetBrains Mono", monospace';
+      var txt= glow? Math.round(glow.prob*100)+'% — firing' : (lastProb!=null? 'last '+Math.round(lastProb*100)+'%' : '—');
+      g.fillText(txt, ap.x, ap.y+32);
+    });
+    // component nodes
+    L.comps.forEach(function(cp){
+      var glow=activeCompGlow[cp.key];
+      var isActive=false;
+      bots.forEach(function(b){ if(botTargetLabel(b)===cp.key) isActive=true; });
+      var bw2=Math.min(168, cw*0.26), bh2=28;
+      var x0=cp.x-bw2/2, y0=cp.y-bh2/2;
+      if(glow||isActive){ g.save(); g.globalAlpha= glow?0.30:0.14; g.fillStyle= glow||'#2f7bff'; g.fillRect(x0-4,y0-4,bw2+8,bh2+8); g.restore(); }
+      g.fillStyle= glow? '#1b2740' : '#12151d';
+      g.fillRect(x0,y0,bw2,bh2);
+      g.lineWidth=1; g.strokeStyle= glow? glow : (isActive? 'rgba(47,123,255,.7)' : '#2c313a'); g.strokeRect(x0,y0,bw2,bh2);
+      g.fillStyle= isActive||glow? '#fff' : '#c9cdd6'; g.font='600 9px Inter, sans-serif';
+      var lbl=cp.label; var maxL= cw<560? 15 : 30; if(lbl.length>maxL) lbl=lbl.slice(0,maxL)+'…';
+      g.fillText(lbl, cp.x, cp.y+3);
+    });
+    if(!componentList.length){
+      g.fillStyle='rgba(154,160,171,.7)'; g.font='11px Inter, sans-serif';
+      g.fillText('Components appear as the swarm builds…', cw*0.85, ch/2);
+    }
+    g.textAlign='left';
+  }
+  function renderDetailStrip(){
+    var title=document.getElementById('detailTitle'); if(!title) return;
+    var jobEl=document.getElementById('detailJob'), inEl=document.getElementById('detailInputs'),
+        trEl=document.getElementById('detailTraits'), acEl=document.getElementById('detailActions'),
+        reEl=document.getElementById('detailRecent'), capEl=document.getElementById('swarmCaption');
+    var idx= pinnedBotIdx>=0? pinnedBotIdx : (decisionLog.length? decisionLog[decisionLog.length-1].botIdx : -1);
+    if(idx<0||!bots[idx]){
+      title.textContent='No bot selected';
+      if(jobEl) jobEl.textContent='Showing the most recent decision-maker. Tap a bot — here or on the Website tab — to pin it.';
+      return;
+    }
+    var b=bots[idx], ev=b.lastDecision||null;
+    if(!ev){ for(var i=decisionLog.length-1;i>=0;i--){ if(decisionLog[i].botIdx===idx){ ev=decisionLog[i]; break; } } }
+    title.innerHTML='<span style="color:'+b.color+'">●</span> '+botId(idx)+' · '+roleFor(b,idx)+(pinnedBotIdx===idx?' — selected':' — latest decision-maker');
+    if(jobEl) jobEl.textContent=jobLineFor(b)+(ev? ' · Last decision: '+ACTION_LABEL[ev.chosen]+' '+Math.round(ev.probs[ev.chosen]*100)+'% · '+relTime(ev.ts):' · No decisions yet');
+    if(capEl) capEl.textContent= ev? (ev.botId+' → '+ACTION_LABEL[ev.chosen]+' ('+Math.round(ev.probs[ev.chosen]*100)+'%) → '+(ev.componentLabel||ev.contextLabel)) : 'Waiting for the first decision…';
+    if(inEl) inEl.innerHTML= ev? '<div class="chip-row">'+INPUT_DEFS.map(function(d){ return '<span class="dchip">'+d[1]+' <b>'+Math.round(ev.inputs[d[0]]*100)+'%</b></span>'; }).join('')+'</div>' : '<span class="detail-empty">No decision yet.</span>';
+    if(trEl) trEl.innerHTML= TRAIT_DEFS.map(function(d){
+      var val=b[d[0]], act= ev? ev.traits[d[0]].activation : 0;
+      return '<div class="tbar"><span>'+d[1]+'</span><i><em style="width:'+Math.round(val*100)+'%;background:'+b.color+'"></em></i><b>'+Math.round(val*100)+'%</b></div>'
+        +'<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#6f757f;margin:-2px 0 6px">activation in decision: '+Math.round(act*100)+'%</div>';
+    }).join('');
+    if(acEl) acEl.innerHTML= ev? ACTION_KEYS.map(function(a){
+      var pc=Math.round(ev.probs[a]*100), chosen=a===ev.chosen;
+      return '<div class="abar'+(chosen?' chosen':'')+'" style="--dc:'+b.color+'"><span>'+ACTION_LABEL[a]+'</span><i><em style="width:'+pc+'%'+(chosen?';background:'+b.color:'')+'"></em></i><b>'+pc+'%</b></div>';
+    }).join('') : '<span class="detail-empty">—</span>';
+    if(reEl){
+      var mine=decisionLog.filter(function(e){ return e.botIdx===idx; }).slice(-4).reverse();
+      reEl.innerHTML= mine.length? mine.map(function(e){ return '<div class="recent-row"><b>'+ACTION_LABEL[e.chosen]+' '+Math.round(e.probs[e.chosen]*100)+'%</b> · '+(e.componentLabel||e.contextLabel)+' · '+relTime(e.ts)+'</div>'; }).join('') : '<span class="detail-empty">No decisions logged for this bot yet.</span>';
+    }
+  }
+  /* ============ METRIC PANELS + LIVE BAR (all numbers from live state) ============ */
+  function computePanelStats(){
+    var now=Date.now();
+    var buckets=[0,0,0,0,0,0], perMin=0;
+    sessionDecisionTimes.forEach(function(ts){
+      var age=now-ts; if(age<60000){ perMin++; var bi=5-Math.floor(age/10000); if(bi>=0&&bi<6) buckets[bi]++; }
+    });
+    var mix={}; var mixPct={};
+    ACTION_KEYS.forEach(function(a){ mix[a]=sessionActionCounts[a]||0; mixPct[a]= sessionDecisionCount? Math.round(mix[a]/sessionDecisionCount*100) : 0; });
+    var traits={ perfectionism:0, energy:0, curiosity:0 };
+    var pool=bots.length? bots : null;
+    if(pool){ pool.forEach(function(b){ traits.perfectionism+=b.perfectionism; traits.energy+=b.energy; traits.curiosity+=b.curiosity; });
+      traits.perfectionism/=pool.length; traits.energy/=pool.length; traits.curiosity/=pool.length; }
+    var crew={ building:0, tweaking:0, patrol:0, base:0 };
+    bots.forEach(function(b){ if(b.mode==='building') crew.building++; else if(b.mode==='tweaking') crew.tweaking++; else if(b.mode==='patrol') crew.patrol++; else crew.base++; });
+    var coverage=[];
+    if(typeof sections!=='undefined' && sections){
+      sections.forEach(function(s){
+        var name=s.getAttribute('data-build-name')||s.id, heat=0;
+        serviceLog.forEach(function(e){ if(e.sec===name) heat+=Math.exp(-(now-e.ts)/120000); });
+        coverage.push({ section:name, heat:Math.min(1, heat/2.5), raw:Math.round(heat*100)/100 });
+      });
+    }
+    var elapsedS=Math.floor((now-pageLoadTs)/1000);
+    return { total:sessionDecisionCount, feedCount:decisionLog.length, perMin:perMin, buckets:buckets,
+      actionMix:mix, actionMixPct:mixPct, traits:traits, crew:crew, coverage:coverage,
+      fps:renderFps, elapsed:elapsedS, bots:bots.length||BOT_COUNT, serviceEvents:serviceLog.length };
+  }
+  function fmtElapsed(s){ var m=Math.floor(s/60), ss=s%60; return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); }
+  function renderPanels(){
+    var st=computePanelStats();
+    var el;
+    el=document.getElementById('nlElapsed'); if(el) el.textContent=fmtElapsed(st.elapsed);
+    el=document.getElementById('nlFps'); if(el) el.textContent= st.fps? st.fps+' FPS' : '— FPS';
+    el=document.getElementById('nlCounts'); if(el) el.innerHTML='BOTS '+st.bots+' · DECISIONS <b>'+st.total+'</b>';
+    el=document.getElementById('mpPerMin'); if(el) el.textContent=st.perMin;
+    el=document.getElementById('mpTotal'); if(el) el.textContent=st.total;
+    el=document.getElementById('mpFeedCount'); if(el) el.textContent=st.feedCount+' events in the feed buffer · '+st.serviceEvents+' patrol service events logged';
+    el=document.getElementById('mpActionMix');
+    if(el){ el.innerHTML= st.total? ACTION_KEYS.map(function(a){ var pc=st.actionMixPct[a];
+        return '<div class="mp-bar"><span>'+ACTION_LABEL[a]+'</span><i><em style="width:'+pc+'%"></em></i><b>'+pc+'%</b></div>'; }).join('')
+      : '<div class="mp-sub">— no decisions yet</div>'; }
+    el=document.getElementById('mpTraits');
+    if(el){ el.innerHTML=TRAIT_DEFS.map(function(d){ var pc=Math.round(st.traits[d[0]]*100);
+        return '<div class="mp-bar"><span>'+d[1]+'</span><i><em style="width:'+pc+'%;background:#a5f3fc"></em></i><b>'+pc+'%</b></div>'; }).join(''); }
+    el=document.getElementById('mpCrew');
+    if(el){ el.innerHTML='<div><b>'+st.crew.building+'</b><span>Building</span></div><div><b>'+st.crew.tweaking+'</b><span>Tweaking</span></div><div><b>'+st.crew.patrol+'</b><span>Patrol</span></div><div><b>'+st.crew.base+'</b><span>At base</span></div>'; }
+    el=document.getElementById('mpCoverage');
+    if(el){
+      if(!el.children.length || el.getAttribute('data-n')!==String(st.coverage.length)){
+        el.setAttribute('data-n', String(st.coverage.length));
+        el.innerHTML=st.coverage.map(function(c,i){ return '<div class="heat-cell" data-ci="'+i+'" title="'+c.section.replace(/"/g,'')+'">'+c.section.split(' ')[0]+'</div>'; }).join('');
+      }
+      st.coverage.forEach(function(c,i){ var cell=el.children[i]; if(!cell) return;
+        cell.style.backgroundColor='rgba(56,189,248,'+(0.04+c.heat*0.55).toFixed(3)+')';
+        cell.style.borderColor= c.heat>0.35? 'rgba(125,211,252,.8)' : '#23262c';
+        cell.title=c.section+' — service heat '+Math.round(c.heat*100)+'%';
+      });
+    }
+    var spark=document.getElementById('mpSpark');
+    if(spark && spark.getContext){
+      var sg=spark.getContext('2d'); var sw=spark.width, sh=spark.height; sg.clearRect(0,0,sw,sh);
+      var maxB=Math.max(1, Math.max.apply(null, st.buckets));
+      var bw=sw/6;
+      st.buckets.forEach(function(v,i){ var bh=Math.max(v?2:0, (v/maxB)*(sh-6));
+        sg.fillStyle= i===5? '#7dd3fc' : 'rgba(56,189,248,.55)';
+        if(v>0) sg.fillRect(i*bw+3, sh-bh, bw-6, bh);
+        sg.fillStyle='rgba(154,160,171,.8)'; sg.font='8px "JetBrains Mono", monospace'; sg.textAlign='center';
+        sg.fillText(String(v), i*bw+bw/2, 9);
+      });
+      sg.textAlign='left';
+    }
+  }
+  setInterval(function(){ if(currentView==='network') renderPanels(); }, 1000);
+
+  function switchView(v){
+    currentView=v;
+    document.body.setAttribute('data-view', v);
+    document.body.setAttribute('data-current-view', v);
+    var tw=document.getElementById('tabWebsite'), tn=document.getElementById('tabNetwork');
+    if(tw){ tw.classList.toggle('active', v==='website'); tw.setAttribute('aria-selected', v==='website'?'true':'false'); }
+    if(tn){ tn.classList.toggle('active', v==='network'); tn.setAttribute('aria-selected', v==='network'?'true':'false'); }
+    try{ history.replaceState(null,'', v==='network'?'#brain':'#top'); }catch(e){}
+    if(v==='network'){ refreshComponents(); renderDetailStrip(); renderPanels(); replayRecentPulses(); var nv=document.getElementById('networkView'); if(nv) nv.scrollTop=0; swarmLastDraw=0; }
+  }
+
+  function addFeedRow(ev){
+    var list=document.getElementById('brainFeedList'); if(!list) return;
+    var empty=document.getElementById('brainFeedEmpty'); if(empty) empty.remove();
+    var row=document.createElement('div'); row.className='feed-row'; row.setAttribute('data-ts', ev.ts);
+    var tops=ACTION_KEYS.map(function(a){ return [a,ev.probs[a]]; }).filter(function(p){ return p[1]>0.005; })
+      .sort(function(a,b){ return b[1]-a[1]; }).slice(0,3)
+      .map(function(p){ return ACTION_LABEL[p[0]]+' '+Math.round(p[1]*100)+'%'; }).join(' · ');
+    row.innerHTML='<span class="feed-dot" style="background:'+ev.color+'"></span>'
+      +'<span class="feed-bot" style="color:'+ev.color+'">'+ev.botId+'</span>'
+      +'<span class="feed-action">'+ACTION_LABEL[ev.chosen]+'</span>'
+      +'<span class="feed-probs">'+tops+'</span>'
+      +'<span class="feed-ctx">'+ev.contextLabel+'</span>'
+      +'<span class="feed-time">'+relTime(ev.ts)+'</span>';
+    list.insertBefore(row, list.firstChild);
+    while(list.children.length>8) list.removeChild(list.lastChild);
+  }
+  function updateBrainHeader(){
+    var wEl=document.getElementById('brainWatch'), sEl=document.getElementById('brainState'),
+        dEl=document.getElementById('brainBotDot'), bEl=document.getElementById('brainAutoBtn'),
+        cEl=document.getElementById('brainCaption');
+    if(!wEl) return;
+    var pinned=pinnedBotIdx>=0;
+    if(watchedBotIdx>=0 && bots[watchedBotIdx]){
+      var b=bots[watchedBotIdx];
+      wEl.textContent='Watching: '+botId(watchedBotIdx);
+      if(dEl){ dEl.style.setProperty('--bc', b.color); dEl.querySelector('i').style.background=b.color; }
+    } else {
+      wEl.textContent='Watching: —';
+      if(dEl) dEl.querySelector('i').style.background='#55555c';
+    }
+    sEl.textContent= pinned? 'Pinned' : 'Auto-following latest decision';
+    if(bEl) bEl.disabled=!pinned;
+    if(cEl){
+      if(shownEvent){
+        var age=relTime(shownEvent.ts);
+        cEl.textContent=shownEvent.botId+' · '+phaseLabelFor(shownEvent.phase)+' · chose '+ACTION_LABEL[shownEvent.chosen]
+          +' ('+Math.round(shownEvent.probs[shownEvent.chosen]*100)+'%) · '+age+(pinned?' · pinned':'');
+      } else if(watchedBotIdx>=0){
+        cEl.textContent='Waiting for '+botId(watchedBotIdx)+' to decide…';
+      } else {
+        cEl.textContent='Waiting for the first decision…';
+      }
+    }
+  }
+
+  /* ---------- Decision Network canvas rendering ----------
+     Resting state redraws at low frequency from the main rAF loop; while
+     a pulse travels, it redraws every frame. Nodes: inputs (left),
+     traits (middle — radius/glow from trait value x activation),
+     actions (right — probability %; chosen glows in the bot's colour). */
+  var brainCv=null, brainCx=null, brainLastDraw=0;
+  function brainNodes(w,h){
+    var ix=w*0.20, tx=w*0.52, ax=w*0.84;
+    function col(x,n,top,bot){ var pts=[]; for(var i=0;i<n;i++) pts.push({x:x, y: n===1? (top+bot)/2 : top+(bot-top)*(i/(n-1))}); return pts; }
+    return { inputs:col(ix,5,h*0.16,h*0.86), traits:col(tx,3,h*0.24,h*0.78), actions:col(ax,4,h*0.18,h*0.84) };
+  }
+  function drawBrain(now, force){
+    if(!brainCv){ brainCv=document.getElementById('brainCanvas'); if(!brainCv) return; brainCx=brainCv.getContext('2d'); }
+    var pulsing=brainPulse && (now-brainPulse.start)<brainPulse.dur;
+    if(brainPulse && !pulsing) brainPulse=null;
+    if(!force && !pulsing && now-brainLastDraw<280) return;
+    brainLastDraw=now;
+    var wrap=brainCv.parentElement; if(!wrap) return;
+    var cw=wrap.clientWidth, ch=brainCv.clientHeight||300;
+    if(cw<40) return;
+    var dpr=Math.min(window.devicePixelRatio||1,2);
+    if(brainCv.width!==Math.round(cw*dpr) || brainCv.height!==Math.round(ch*dpr)){
+      brainCv.width=Math.round(cw*dpr); brainCv.height=Math.round(ch*dpr);
+    }
+    var g=brainCx; g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,cw,ch);
+    var ev=shownEvent, wb=(watchedBotIdx>=0?bots[watchedBotIdx]:null);
+    var dim=!ev && !wb;
+    var N=brainNodes(cw,ch);
+    g.font='600 8.5px "JetBrains Mono", monospace'; g.textAlign='center';
+    [['INPUTS',N.inputs[0].x],['TRAITS',N.traits[0].x],['ACTIONS',N.actions[0].x]].forEach(function(hd){
+      g.fillStyle='rgba(154,160,171,.8)'; g.fillText(hd[0], hd[1], 18);
+    });
+    // ---- edges (all faint; shown decision's edges weighted)
+    INPUT_DEFS.forEach(function(idf,ii){
+      TRAIT_DEFS.forEach(function(td,ti){
+        var wgt= ev? ev.inputs[idf[0]]*(INPUT_TRAIT_REL[idf[0]][td[0]]||0.2)*(0.35+ev.traits[td[0]].activation) : 0;
+        g.strokeStyle='rgba(90,110,150,'+(ev?(0.06+wgt*0.5):0.05)+')';
+        g.lineWidth=ev? 0.6+wgt*2.4 : 0.7;
+        g.beginPath(); g.moveTo(N.inputs[ii].x, N.inputs[ii].y); g.lineTo(N.traits[ti].x, N.traits[ti].y); g.stroke();
+      });
+    });
+    TRAIT_DEFS.forEach(function(td,ti){
+      ACTION_KEYS.forEach(function(a,ai){
+        var raw= ev? Math.abs(ev.traitRaw[td[0]][a]) : 0;
+        var wgt= Math.min(1, raw/1.2);
+        var chosen= ev && ev.chosen===a;
+        g.strokeStyle= chosen? 'rgba(125,176,255,'+(0.15+wgt*0.65)+')' : 'rgba(90,110,150,'+(ev?(0.05+wgt*0.45):0.05)+')';
+        g.lineWidth=ev? 0.6+wgt*2.6 : 0.7;
+        g.beginPath(); g.moveTo(N.traits[ti].x, N.traits[ti].y); g.lineTo(N.actions[ai].x, N.actions[ai].y); g.stroke();
+      });
+    });
+    function node(x,y,r,fill,alpha){
+      g.globalAlpha=alpha; g.beginPath(); g.arc(x,y,r,0,7); g.fillStyle=fill; g.fill();
+      g.globalAlpha=alpha*0.9; g.lineWidth=1; g.strokeStyle='rgba(0,0,0,.6)'; g.stroke(); g.globalAlpha=1;
+    }
+    g.textAlign='center';
+    // inputs
+    INPUT_DEFS.forEach(function(idf,ii){
+      var v= ev? ev.inputs[idf[0]] : 0;
+      node(N.inputs[ii].x, N.inputs[ii].y, 7+v*6, '#7db0ff', dim?0.3:0.55+v*0.45);
+      g.fillStyle= dim?'rgba(154,160,171,.45)':'#c9cdd6'; g.font='600 9.5px Inter, sans-serif';
+      g.fillText(idf[1], N.inputs[ii].x, N.inputs[ii].y-16);
+      g.fillStyle='rgba(125,176,255,.9)'; g.font='10px "JetBrains Mono", monospace';
+      g.fillText(ev? Math.round(v*100)+'%':'—', N.inputs[ii].x, N.inputs[ii].y+24);
+    });
+    // traits — pinned/watched bot's traits show even before its first decision
+    TRAIT_DEFS.forEach(function(td,ti){
+      var val= ev? ev.traits[td[0]].value : (wb? wb[td[0]] : 0);
+      var act= ev? ev.traits[td[0]].activation : 0;
+      var r=9+val*7+(ev? act*6:0);
+      if(ev && act>0.04){ g.save(); g.globalAlpha=0.25+act*0.5; g.fillStyle=(wb?wb.color:'#ffd60a');
+        g.beginPath(); g.arc(N.traits[ti].x, N.traits[ti].y, r+7+act*6, 0, 7); g.fill(); g.restore(); }
+      node(N.traits[ti].x, N.traits[ti].y, r, (wb?wb.color:'#ffd60a'), dim?0.3:0.85);
+      g.fillStyle= dim?'rgba(154,160,171,.45)':'#fff'; g.font='600 9.5px Inter, sans-serif';
+      g.fillText(td[1], N.traits[ti].x, N.traits[ti].y-r-9);
+      g.fillStyle='rgba(230,232,236,.85)'; g.font='10px "JetBrains Mono", monospace';
+      g.fillText(wb||ev? Math.round(val*100)+'%':'—', N.traits[ti].x, N.traits[ti].y+r+15);
+    });
+    // actions
+    ACTION_KEYS.forEach(function(a,ai){
+      var p= ev? ev.probs[a] : 0;
+      var chosen= ev && ev.chosen===a;
+      var r=8+p*11;
+      if(chosen){ g.save(); g.globalAlpha=0.4; g.fillStyle=(wb?wb.color:'#ffd60a');
+        g.beginPath(); g.arc(N.actions[ai].x, N.actions[ai].y, r+9, 0, 7); g.fill(); g.restore(); }
+      node(N.actions[ai].x, N.actions[ai].y, r, chosen?(wb?wb.color:'#ffd60a'):'#3a4152', dim?0.3:(chosen?1:0.45+p*0.5));
+      g.fillStyle= dim?'rgba(154,160,171,.45)':(chosen?'#fff':'#c9cdd6'); g.font=(chosen?'700':'600')+' 9.5px Inter, sans-serif';
+      g.fillText(ACTION_LABEL[a], N.actions[ai].x, N.actions[ai].y-r-9);
+      g.fillStyle= chosen?'#7db0ff':'rgba(201,205,214,.8)'; g.font='10px "JetBrains Mono", monospace';
+      g.fillText(ev? Math.round(p*100)+'%':'—', N.actions[ai].x, N.actions[ai].y+r+15);
+    });
+    // ---- pulse: pixel squares travel input -> strongest trait -> chosen action
+    if(brainPulse && ev){
+      var bp=brainPulse, pr=(now-bp.start)/bp.dur;
+      if(pr>=0 && pr<1){
+        // strongest trait for the chosen action = biggest raw contribution
+        var bestT=0, bestV=-1;
+        TRAIT_DEFS.forEach(function(td,ti){ var v=Math.abs(ev.traitRaw[td[0]][ev.chosen]) + ev.traits[td[0]].activation*0.4;
+          if(v>bestV){ bestV=v; bestT=ti; } });
+        var bestI=0; bestV=-1;
+        INPUT_DEFS.forEach(function(idf,ii){ var v=ev.inputs[idf[0]]*(INPUT_TRAIT_REL[idf[0]][TRAIT_DEFS[bestT][0]]||0.2);
+          if(v>bestV){ bestV=v; bestI=ii; } });
+        var ai2=ACTION_KEYS.indexOf(ev.chosen);
+        var p0=N.inputs[bestI], p1=N.traits[bestT], p2=N.actions[ai2];
+        for(var s2=0;s2<3;s2++){
+          var pp=pr - s2*0.045; if(pp<0) continue;
+          var x,y;
+          if(pp<0.5){ var f=pp/0.5; x=p0.x+(p1.x-p0.x)*f; y=p0.y+(p1.y-p0.y)*f; }
+          else { var f2=(pp-0.5)/0.5; x=p1.x+(p2.x-p1.x)*f2; y=p1.y+(p2.y-p1.y)*f2; }
+          var sz=3.5-s2*0.8;
+          g.globalAlpha=0.95-s2*0.25; g.fillStyle= s2? (wb?wb.color:'#ffd60a') : '#ffffff';
+          g.fillRect(x-sz/2, y-sz/2, sz, sz);
+        }
+        g.globalAlpha=1;
+      }
+    }
+    g.textAlign='left';
+  }
+
+  function jevDecide(bot, st){
+    // st = { phase:'join'|'complete'|'tweak', sizeClass, justCompleted,
+    //        nextWaiting, tweakAge (0..1), currentAssignment }
+    var perf=bot.perfectionism, en=bot.energy, cur=bot.curiosity, w, probs={}, total=0, k;
+    if(st.phase==='join'){
+      // P(join): energetic + curious bots volunteer; big elements attract the
+      // curious; tired bots skip small jobs more often.
+      var pJoin=0.34 + en*0.38 + cur*0.22
+        + (st.sizeClass==='large' ? 0.14+cur*0.12 : 0)
+        + (st.sizeClass==='small' ? -0.12*(1-en)+perf*0.05 : 0);
+      pJoin=clampP(pJoin,0.08,0.95);
+      probs={ join:pJoin, return_base:1-pJoin };
+      var jAct=(Math.random()<pJoin?'join':'return_base');
+      recordDecision(bot, st, probs, jAct);
+      return { probs:probs, action:jAct };
+    }
+    if(st.phase==='complete'){
+      // Element just hit 100%: staying behind to tweak is a first-class
+      // outcome — weighted so perfectionists reliably linger instead of
+      // almost always being pulled along to the next element.
+      w={
+        stay_tweak: 0.55 + perf*1.50 + (st.nextWaiting?-0.05:0.30) - en*0.10,
+        move_on:    0.45 + en*0.60 + (st.nextWaiting?0.25:0.0),
+        return_base:0.18 + (1-en)*0.25
+      };
+    } else { // 'tweak' re-decide: leaving gets likelier only late in the stint
+      var age=st.tweakAge||0;
+      w={
+        stay_tweak: (0.55 + perf*1.20) * (1-age*0.50),
+        move_on:    0.30 + en*0.45 + age*0.55 + (st.nextWaiting?0.15:0),
+        return_base:0.16 + (1-en)*0.22 + age*0.20
+      };
+    }
+    for(k in w){ w[k]=Math.max(0.02,w[k]); total+=w[k]; }
+    for(k in w) probs[k]=w[k]/total;
+    var cAct=sampleWeighted(w);
+    recordDecision(bot, st, probs, cAct);
+    return { probs:probs, action:cAct };
+  }
+  /* Crew size for an element: small pieces get ONLY the core 5; medium
+     pieces call up a few extra bots; large pieces scale to ~18-24. */
+  function crewDesired(area, kind){
+    if(kind==='word'||kind==='chip'||kind==='stat') return CORE_CREW;
+    if(area<40000) return CORE_CREW;
+    if(area<150000) return 9+Math.floor(Math.random()*4);        // 9–12
+    return 18+Math.floor(Math.random()*7);                        // 18–24
+  }
+  function sizeClassFor(n){ return n<=CORE_CREW?'small':(n<=12?'medium':'large'); }
+  /* JOIN DECISIONS at an element boundary: every available bot runs
+     jevDecide() and may volunteer or stay put — then guarantees are applied
+     so a job never stalls: at least 3 of the core 5 always join, and if
+     volunteers fall short of the desired crew, the nearest available bots
+     are conscripted. Extras beyond the desired size retire to base. */
+  function pickCrew(el, kind){
+    var r=el.getBoundingClientRect();
+    var area=Math.max(1,(el.offsetWidth||r.width||10)*(el.offsetHeight||r.height||10));
+    var desired=crewDesired(area, kind);
+    var sizeClass=sizeClassFor(desired);
+    var smallJob=(desired<=CORE_CREW);
+    // candidate pool: tweakers keep tweaking; small jobs are core-only
+    var pool=[];
+    bots.forEach(function(b,i){
+      if(b.mode==='tweaking') return;
+      if(smallJob && i>=CORE_CREW) return;
+      pool.push(i);
+    });
+    desired=Math.min(desired, Math.max(pool.length,0));
+    var joined=[];
+    pool.forEach(function(i){
+      var d=jevDecide(bots[i],{ phase:'join', sizeClass:sizeClass, nextWaiting:true, currentAssignment:bots[i].mode, botIdx:i, el:el, area:area, desired:desired, completePct:0 });
+      if(d.action==='join') joined.push(i);
+    });
+    // guarantee: at least 3 of the core 5
+    var coreIn=joined.filter(function(i){ return i<CORE_CREW; }).length;
+    for(var ci=0; ci<CORE_CREW && coreIn<3; ci++){
+      if(pool.indexOf(ci)>=0 && joined.indexOf(ci)<0){ joined.push(ci); coreIn++; }
+    }
+    // conscript nearest available bots if volunteers fall short
+    if(joined.length<desired){
+      var cx=r.left+r.width/2, cy=r.top+r.height/2;
+      var rest=pool.filter(function(i){ return joined.indexOf(i)<0; });
+      rest.sort(function(a,b){
+        var da=(bots[a].x-cx)*(bots[a].x-cx)+(bots[a].y-cy)*(bots[a].y-cy);
+        var db=(bots[b].x-cx)*(bots[b].x-cx)+(bots[b].y-cy)*(bots[b].y-cy);
+        return da-db;
+      });
+      while(joined.length<desired && rest.length) joined.push(rest.shift());
+    }
+    // trim oversubscription: core first, then a random pick of the extras
+    if(joined.length>desired){
+      var core=joined.filter(function(i){ return i<CORE_CREW; });
+      var extra=joined.filter(function(i){ return i>=CORE_CREW; });
+      for(var k=extra.length-1;k>0;k--){ var j=Math.floor(Math.random()*(k+1)); var t=extra[k]; extra[k]=extra[j]; extra[j]=t; }
+      joined=core.concat(extra.slice(0,Math.max(0,desired-core.length)));
+    }
+    crewIdxs=joined; currentDesired=desired;
+    bots.forEach(function(b,i){
+      if(b.mode==='tweaking') return;
+      if(joined.indexOf(i)>=0){ cleanupMicro(b); b.mode='building'; b.patrolEl=null; if(b.dispatchEl && b.dispatchEl!==el) b.dispatchEl=null; }
+      else if(b.mode==='building'){ b.mode='standby'; b.dispatchEl=null; } // freed from the crew -> standby duty below
+      // bots already patrolling / helping keep their duty — nobody is parked idle
+    });
+    assignSlots(el);
+    assignStandby();
+    updateCrewHud();
+  }
+  /* ---------- Standby duty: NOBODY sits idle at base during a build ----------
+     Every bot not on the current crew and not tweaking gets a real job:
+     patrol an already-built container (older work), checking it and fixing
+     little pixel faults on a slow rotation. Only when nothing has been
+     built yet does a standby bot hover as a helper around the live build. */
+  function assignPatrol(b, idx){
+    var now=performance.now();
+    var cands=builtEls.filter(function(e){ return e && e.isConnected && e!==focusEl; });
+    if(!cands.length){ cleanupMicro(b); b.patrolEl=null; b.mode=focusEl?'helper':'base'; return false; }
+    var scored=cands.map(function(e){
+      var n=0; bots.forEach(function(o){ if(o!==b && o.mode==='patrol' && o.patrolEl===e) n++; });
+      var r=e.getBoundingClientRect();
+      var vis=(r.bottom>-200 && r.top<H+200)?0:1;
+      var stale=Math.min(30,(now-(e._servicedAt||0))/2000);
+      return { e:e, key:vis*100 + n*30 - stale }; // visible, least-crewed, longest-unserviced first
+    });
+    scored.sort(function(a,b2){ return a.key-b2.key; });
+    var pick=scored[0].e; pick._servicedAt=now;
+    cleanupMicro(b);
+    b.mode='patrol'; b.patrolEl=pick;
+    b.patrolUntil=now+6500+Math.random()*5500; // a long, calm stint before rotating
+    b.fixFx=null;
+    return true;
+  }
+  function assignStandby(){
+    bots.forEach(function(b,i){
+      if(b.mode==='building'||b.mode==='tweaking'||b.mode==='patrol') return;
+      assignPatrol(b,i); // helpers/standby/base bots graduate to patrol as soon as older work exists
+    });
+    updateCrewHud();
+  }
+  /* COMPLETION DECISIONS: an element just reached 100% — each bot on it
+     decides via jevDecide(). Most move on with the crew; perfectionists may
+     stay behind as tweakers on the finished element (capped at 3 per
+     element) while the rest build the next piece. Tweaking never
+     un-completes anything and never blocks the queue. */
+  function completionDecisions(el, kind){
+    if(kind==='word'||kind==='reveal'||kind==='teeth') return;
+    var now=performance.now();
+    var area=(el.offsetWidth||0)*(el.offsetHeight||0);
+    var big=(kind==='frame'||kind==='stat'||area>=60000);
+    var medium=(kind==='block'||area>=16000);
+    if(!big && !medium && Math.random()<0.6) return; // tiny pieces: usually no tweaker
+    var want=big?2:(medium?1:0); // GUARANTEED tweakers on substantial pieces
+    var have=0, totalTw=0;
+    bots.forEach(function(b){ if(b.mode==='tweaking'){ totalTw++; if(b.tweakEl===el) have++; } });
+    // the most perfectionist crew members are first in line to stay behind
+    var cands=crewIdxs.slice().filter(function(i){ return bots[i] && bots[i].mode==='building'; });
+    cands.sort(function(a,b2){ return bots[b2].perfectionism-bots[a].perfectionism; });
+    cands.forEach(function(i){
+      if(totalTw>=6) return;
+      var b=bots[i]; if(!b||b.mode!=='building') return;
+      var stay = have<want; // guaranteed slots first…
+      if(!stay){ // …then the Jev-style decision for everyone else
+        var d=jevDecide(b,{ phase:'complete', justCompleted:true, nextWaiting:true, sizeClass:sizeClassFor(currentDesired), currentAssignment:'building', botIdx:i, el:el, area:area, desired:currentDesired, completePct:1 });
+        stay=(d.action==='stay_tweak');
+      }
+      if(stay){
+        b.mode='tweaking'; b.tweakEl=el; b.tweakFx=null; b.tweakStart=now;
+        // long enough to actually be seen working the finished piece: ~6–11s
+        b.tweakUntil=now+Math.min(11500, 6200+b.perfectionism*3800+Math.random()*1400);
+        b.tweakNextCheck=now+2600;
+        have++; totalTw++;
+      }
+    });
+    updateCrewHud();
+  }
+  /* A tweaker leaves: half the time it rejoins the crew on whatever is
+     currently building (if there is room), otherwise it returns to base. */
+  function releaseTweaker(b, idx){
+    if(b.tweakEl && b.tweakEl.style) b.tweakEl.style.transform='';
+    cleanupMicro(b); // never leave a glitched letter behind when a bot leaves
+    b.mode='base'; b.tweakEl=null; b.tweakFx=null;
+    if(focusEl && crewIdxs.indexOf(idx)<0 && crewIdxs.length<currentDesired+2 && Math.random()<0.5){
+      crewIdxs.push(idx); b.mode='building'; assignSlots(focusEl);
+    }
+    updateCrewHud();
+  }
+  function updateCrewHud(){
+    var el=document.getElementById('hudCrew'); if(!el) return;
+    var tw=0, pat=0;
+    bots.forEach(function(b){ if(b.mode==='tweaking') tw++; if(b.mode==='patrol') pat++; });
+    var bd=focusEl?crewIdxs.length:0;
+    el.textContent=(bd||tw||pat)?('Building: '+bd+' · Tweaking: '+tw+' · Older work: '+pat):'';
+  }
+
+  /* Shuffle which bot takes which perimeter slot + fresh jitter & arc per new target.
+     Called every time the crew moves onto a new component, so no two builds look alike. */
+  var lastFocusEl=null;
+  function assignSlots(el){
+    var crewIdx=crewIdxs.length?crewIdxs.slice():[0,1,2,3,4].filter(function(i){ return i<bots.length; });
+    // NO reshuffle and NO re-rolled speed/orbit: each bot keeps its station,
+    // pace and working rhythm from piece to piece, so the crew glides onto
+    // the next component instead of darting to brand-new random spots.
+    // Only a small blended nudge of jitter keeps builds from looking stamped.
+    crewIdx.forEach(function(botIdx,slotPos){
+      var b=bots[botIdx];
+      b.slotIdx=slotPos;
+      b.slotJitterX=(b.slotJitterX||0)*0.55+(Math.random()-0.5)*20;
+      b.slotJitterY=(b.slotJitterY||0)*0.55+(Math.random()-0.5)*16;
+      b.arc=(Math.random()-0.5)*0.9;
+      b.workJiggle=0.5+Math.random()*0.9;
+    });
+    // helpers keep persistent hover offsets too
+    bots.forEach(function(b,i){
+      if(crewIdx.indexOf(i)>=0) return;
+      if(b.helperAng==null){ b.helperAng=Math.random()*Math.PI*2; b.helperDist=52+Math.random()*70; }
+    });
+    lastFocusEl=el;
+  }
+  function burstAt(x,y){ burstPoint={x:x,y:y}; burstUntil=Date.now()+900; }
+  window.burstAt=burstAt;
+
+  /* =====================================================================
+     TAP A BOT — BUBBLE + TRICK · DOUBLE-TAP SENDS IT TO WORK
+     ---------------------------------------------------------------------
+     Bots are canvas-drawn, so taps are hit-tested against live bot
+     positions on pointerup (a press that moves >14px or lasts >600ms is
+     a scroll/drag, not a tap). Taps landing on links, buttons, tabs,
+     console tiles, the header or the HUD are left completely alone.
+     A first tap waits ~260ms: a second tap on the SAME bot inside that
+     window cancels the trick and dispatches the bot instead.
+     ===================================================================== */
+  var bubbleEl=document.getElementById('botBubble');
+  var bubbleIdx=-1, bubbleHideAt=0;
+  var pendingTap=null; // {idx, timer}
+  function botId(idx){ return 'B-'+String(idx+1).padStart(2,'0'); }
+  function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+  function roleFor(b, idx){
+    // Console-tile role wins where indices overlap (all live bots do);
+    // the mode-derived role is only the fallback when no tile exists.
+    if(idx!=null && idx<names.length){
+      var p=names[idx].split('·')[0].trim();
+      if(p.indexOf('Tweaker')===0) return 'Polisher';
+      if(p) return p; // Core crew · Reinforcement · Patrol · Builder · Scout · Decision watch
+    }
+    if(b.mode==='tweaking') return 'Polisher';
+    if(b.mode==='patrol') return 'Patrol';
+    if(b.mode==='building') return 'Builder';
+    if(b.mode==='helper'||b.mode==='standby') return 'Standby';
+    return 'Reserve';
+  }
+  function describeEl(el){
+    if(!el) return 'the current piece';
+    if(el.id==='mockBox') return 'Swarm Console';
+    if(el.id==='toothGrid') return 'Swarm Console tiles';
+    var sec=(el.closest?el.closest('.build-section'):null);
+    var sn=sec?sec.getAttribute('data-build-name'):null;
+    var t=(el.textContent||'').replace(/\s+/g,' ').trim();
+    if(t && t.length>2){
+      var lbl=t.slice(0,24)+(t.length>24?'…':'');
+      return sn? (sn+' — '+lbl) : lbl;
+    }
+    return sn||'the current piece';
+  }
+  function jobLineFor(b){
+    if(b.mode==='building' && b.dispatchEl && b.dispatchEl!==focusEl) return 'Heading to: '+describeEl(b.dispatchEl);
+    if(b.mode==='building' && focusEl) return 'Building: '+describeEl(focusEl);
+    if(b.mode==='building') return 'Building with the crew';
+    if(b.mode==='tweaking' && b.tweakEl) return 'Tweaking: '+describeEl(b.tweakEl);
+    if(b.mode==='patrol' && b.patrolEl) return 'Patrolling: '+describeEl(b.patrolEl);
+    if(b.mode==='helper') return 'On standby — circling the live build';
+    if(b.mode==='standby') return 'On standby near the build';
+    return 'Waiting at BOT BASE';
+  }
+  function quipFor(b){
+    var perf=b.perfectionism, en=b.energy, cur=b.curiosity;
+    if(b.mode==='tweaking'){
+      if(perf>=en && perf>=cur) return pick(['It was finished. I\'m making it more finished.','One more pixel. Then one more.','I can see a pixel from here. Not on my watch.']);
+      return pick(['Polishing counts as building. Fancier building.','Almost perfect. Almost is my favourite word.']);
+    }
+    if(b.mode==='patrol') return pick(['Older work still counts.','Just checking the pixels are behaving.','Nothing escapes patrol. Nothing.']);
+    if(b.mode==='base') return pick(['Resting. Definitely not plotting.','At base. Recharging my opinions.','Waiting for the next scroll. Patiently. Mostly.']);
+    if(en>=perf && en>=cur) return pick(['Next piece. Next piece. Next—','Building! Best part of the day.','Pixels in. Doubts out.']);
+    if(cur>=perf && cur>=en) return pick(['I came to fix one pixel and stayed for nine.','What\'s inside this one? Let\'s find out.','Every component hides a secret. Probably.']);
+    if(perf>=0.55) return pick(['Straight lines only. I insist.','Measure twice, place once.','That pixel knows what it did.']);
+    return pick(['On it. Whatever "it" currently is.','Happy to be tapped. Happier to build.','Reporting for duty, as always.']);
+  }
+  function traitRow(label, v){
+    var pct=Math.round(v*100);
+    return '<div class="bb-trait"><span>'+label+'</span><i><em style="width:'+pct+'%"></em></i><b>'+pct+'%</b></div>';
+  }
+  var bubbleAnchor={x:0,y:0}, bubbleQuipText='', bubbleHeadline='', lastTapPoint=null;
+  function lastDecisionLine(b){
+    if(b&&b.lastDecision){ var ev=b.lastDecision; return 'Last decision: '+ACTION_LABEL[ev.chosen]+' '+Math.round(ev.probs[ev.chosen]*100)+'%'; }
+    return 'Last decision: none yet';
+  }
+  function showBubble(idx, override){
+    var b=bots[idx]; if(!b || !bubbleEl) return;
+    bubbleIdx=idx; bubbleHideAt=0;
+    if(lastTapPoint){ bubbleAnchor.x=lastTapPoint.x; bubbleAnchor.y=lastTapPoint.y; }
+    else { bubbleAnchor.x=b.x; bubbleAnchor.y=b.y; }
+    bubbleHeadline=(override&&override.job)?override.job:jobLineFor(b);
+    bubbleQuipText=(override&&override.quip)?override.quip:quipFor(b);
+    var id=botId(idx);
+    bubbleEl.style.setProperty('--bb', b.color);
+    bubbleEl.setAttribute('data-bot', id);
+    bubbleEl.setAttribute('data-mode', b.mode);
+    bubbleEl.innerHTML='<div class="bb-head"><span>'+id+' · '+roleFor(b,idx)+'</span><span style="display:flex;gap:6px;align-items:flex-start"><span class="bb-dot"></span><button type="button" class="bb-close" id="bbCloseBtn" aria-label="Close bot details">✕</button></span></div>'
+      +'<div class="bb-job">'+bubbleHeadline+'</div>'
+      +'<div class="bb-live" id="bbLiveJob"></div>'
+      +'<div class="bb-traits">'+traitRow('PERFECTIONISM',b.perfectionism)+traitRow('ENERGY',b.energy)+traitRow('CURIOSITY',b.curiosity)+'</div>'
+      +'<div class="bb-quip">&ldquo;'+bubbleQuipText+'&rdquo;</div>'
+      +'<div class="bb-lastdec" id="bbLastDec">'+lastDecisionLine(b)+'</div>'
+      +'<div class="bb-pin">● Selected — highlighted until you tap another bot or tap away.</div>'
+      +'<button type="button" class="bb-watch" id="bbWatchBtn">Watch in Decision Network →</button>'
+      +'<div class="bb-hint">double-tap '+id+' to send it to work · tap empty space to close</div>';
+    bubbleEl.classList.add('show');
+    positionBubbleStatic();
+    updateBubbleText();
+  }
+  function hideBubble(){ bubbleIdx=-1; if(bubbleEl) bubbleEl.classList.remove('show'); }
+  function positionBubbleStatic(){
+    if(bubbleIdx<0 || !bubbleEl) return;
+    var bw=bubbleEl.offsetWidth||248, bh=bubbleEl.offsetHeight||200;
+    var x=bubbleAnchor.x-bw/2;
+    x=Math.max(8, Math.min(Math.max(8,W-bw-8), x));
+    var y=bubbleAnchor.y-bh-24;
+    if(y<76) y=bubbleAnchor.y+30;
+    if(y+bh>H-104) y=Math.max(76, H-104-bh);
+    bubbleEl.style.left=x+'px'; bubbleEl.style.top=y+'px';
+    bubbleEl.setAttribute('data-static-pos', Math.round(x)+','+Math.round(y));
+  }
+  /* Back-compat name: positioning is now one-shot static, never per-frame. */
+  function positionBubble(){ /* static by design — do not move */ }
+  function updateBubbleText(){
+    if(bubbleIdx<0) return;
+    var b=bots[bubbleIdx]; if(!b) return;
+    var live=document.getElementById('bbLiveJob');
+    if(live) live.innerHTML='now: <b>'+jobLineFor(b)+'</b>';
+    var ld=document.getElementById('bbLastDec');
+    if(ld) ld.textContent=lastDecisionLine(b);
+    if(bubbleEl) bubbleEl.setAttribute('data-mode', b.mode);
+  }
+  function updateBubble(now){
+    if(bubbleIdx<0) return;
+    /* STATIC: position never changes here — only the live job / last-decision text refreshes. */
+    if(!updateBubble._at || now-updateBubble._at>700){ updateBubble._at=now; updateBubbleText(); }
+  }
+  function clearSelection(){
+    hideBubble();
+    if(pinnedBotIdx>=0) unpinBrain(); else renderDetailStrip();
+    document.body.removeAttribute('data-selected-bot');
+  }
+  function selectBot(idx){ pinBot(idx); }
+  /* ---- Tricks: purely visual state on the bot (spin / hop / wave in
+     drawBot, loop-the-loop in the movement loop). The bot's job target
+     (tx/ty) is never touched, so it resumes exactly where it was. ---- */
+  function startTrick(idx){
+    var b=bots[idx]; if(!b) return;
+    var now=performance.now();
+    if(reduced){ // simple hop-less stardust puff
+      for(var s=0;s<4;s++) sparks.push({ x:b.x+(Math.random()-0.5)*16, y:b.y+(Math.random()-0.5)*12, t:performance.now(), c:s?b.color:'#ffffff' });
+      document.body.setAttribute('data-last-trick', botId(idx)+':puff');
+      return;
+    }
+    var type=pick(['spin','hop','wave']);
+    b.trick={ type:type, start:now, dur:(type==='spin'?650:(type==='hop'?580:820)), cx:b.x, cy:b.y, r:34 };
+    spawnDust(b.x, b.y, b.color, 12, 22);
+    bots.forEach(function(o,oi){ // nearby bots react: tiny hop or a lean toward it
+      if(oi===idx || o.trick || o.react) return;
+      var dx=o.x-b.x, dy=o.y-b.y;
+      if(dx*dx+dy*dy<120*120) o.react={ start:now, until:now+520, type:(Math.random()<0.5?'hop':'lean'), lean:(o.x<b.x?-1:1) };
+    });
+    document.body.setAttribute('data-last-trick', botId(idx)+':'+type);
+  }
+  function startLoop(idx){
+    var b=bots[idx]; if(!b) return;
+    var now=performance.now();
+    b.trick={ type:'loop', start:now, dur:980, cx:b.x, cy:b.y, r:37 };
+    spawnDust(b.x, b.y, b.color, 16, 26);
+    document.body.setAttribute('data-last-trick', botId(idx)+':loop');
+  }
+  function fireSingle(idx){
+    var b=bots[idx]; if(!b) return;
+    pinBot(idx); // a completed single tap pins the Decision Network to this bot
+    var taps=(b.tapTimes||[]).length;
+    if(taps>=3 && !reduced){ // overexcited: loop-the-loop, then settle
+      b.tapTimes=[];
+      startLoop(idx);
+      showBubble(idx,{ quip:pick(['WHEEE— okay. Okay. I am calm. I am— WHEEE.','Too much tapping. Not enough— WHEEE.','Loop complete. Professionalism restored. Mostly.']), dur:3600 });
+      return;
+    }
+    startTrick(idx);
+    showBubble(idx);
+  }
+  /* ---- Double-tap: dispatch the bot to work ---- */
+  function dispatchBot(idx){
+    var b=bots[idx]; if(!b) return;
+    pinBot(idx); // a double tap dispatches — and leaves the brain pinned on this bot
+    var now=performance.now();
+    b.tapTimes=[]; // a dispatch is not part of the single-tap escalation count
+    cleanupMicro(b);
+    if(b.mode==='building' && focusEl && crewIdxs.indexOf(idx)>=0){
+      b.boostUntil=now+3500; // already on it: visible speed burst + richer stardust
+      spawnDust(b.x, b.y, b.color, 14, 22);
+      showBubble(idx,{ job:'Already on it — double speed!', quip:'ZOOM. (Still precise. Just faster.)', dur:2600 });
+      document.body.setAttribute('data-last-dispatch', botId(idx)+':boost');
+      return;
+    }
+    if(b.mode==='tweaking' && b.tweakEl && b.tweakEl.style) b.tweakEl.style.transform='';
+    var targetEl=focusEl, targetSec=focusEl&&focusEl.closest?focusEl.closest('.build-section'):null;
+    if(targetEl){
+      b.mode='building'; b.tweakEl=null; b.patrolEl=null; b.dispatchEl=targetEl;
+      if(crewIdxs.indexOf(idx)<0) crewIdxs.push(idx);
+      b.slotIdx=crewIdxs.indexOf(idx);
+      assignSlots(targetEl);
+      spawnDust(b.x, b.y, b.color, 14, 22);
+      showBubble(idx,{ job:'On my way — reinforcing '+(targetSec?targetSec.getAttribute('data-build-name'):describeEl(targetEl)), quip:'Reinforcement mode: engaged.', dur:2800 });
+    } else {
+      var best=null, bd=1e12;
+      sections.forEach(function(s){
+        if(state[s.id]==='built') return;
+        var r=s.getBoundingClientRect();
+        if(r.bottom<40 || r.top>H-40) return;
+        var d=Math.abs(r.top+r.height/2-H/2);
+        if(d<bd){ bd=d; best=s; }
+      });
+      if(best){
+        enqueue(best);
+        b.mode='building'; b.tweakEl=null; b.patrolEl=null; b.dispatchEl=best;
+        if(crewIdxs.indexOf(idx)<0) crewIdxs.push(idx);
+        b.slotIdx=crewIdxs.indexOf(idx);
+        spawnDust(b.x, b.y, b.color, 14, 22);
+        showBubble(idx,{ job:'On my way — reinforcing '+(best.getAttribute('data-build-name')||'next section'), quip:'New orders received. Flying!', dur:2800 });
+      } else {
+        var bc=null, bcd=1e18;
+        builtEls.forEach(function(e){
+          if(!e || !e.isConnected) return;
+          var r=e.getBoundingClientRect();
+          if(r.bottom<0 || r.top>H) return;
+          var cx=r.left+r.width/2, cy=r.top+r.height/2, dx=cx-b.x, dy=cy-b.y, d=dx*dx+dy*dy;
+          if(d<bcd){ bcd=d; bc=e; }
+        });
+        if(bc){
+          b.mode='tweaking'; b.tweakEl=bc; b.patrolEl=null; b.dispatchEl=null;
+          b.tweakStart=now; b.tweakUntil=now+7000; b.tweakNextCheck=now+2600; b.microNextAt=0;
+          spawnDust(b.x, b.y, b.color, 12, 20);
+          showBubble(idx,{ job:'On my way — tweaking '+describeEl(bc), quip:'Dispatch received. It will be perfect.', dur:2800 });
+        } else {
+          b.mode='base'; b.patrolEl=null;
+          showBubble(idx,{ job:'All built — heading back to BOT BASE', quip:'Everything is built. Suspicious.', dur:2600 });
+        }
+      }
+    }
+    updateCrewHud();
+    document.body.setAttribute('data-last-dispatch', botId(idx)+':'+b.mode);
+  }
+  function nearestBotIdx(x, y){
+    var best=-1, bd=42*42;
+    bots.forEach(function(b,i){ var dx=b.x-x, dy=b.y-y, d=dx*dx+dy*dy; if(d<bd){ bd=d; best=i; } });
+    return best;
+  }
+  function handleTap(x, y){
+    lastTapPoint={x:x, y:y};
+    var idx=nearestBotIdx(x, y);
+    if(idx<0){ if(pendingTap){ clearTimeout(pendingTap.timer); pendingTap=null; } if(bubbleIdx>=0||pinnedBotIdx>=0) clearSelection(); burstAt(x, y); spawnDust(x, y, '#7db0ff', 10, 16); return; } // miss: close pop-up + clear highlight, generic burst
+    var b=bots[idx], now=Date.now();
+    b.tapTimes=(b.tapTimes||[]).filter(function(t){ return now-t<4000; });
+    b.tapTimes.push(now);
+    if(pendingTap && pendingTap.idx===idx){ // second tap on the SAME bot in the window
+      clearTimeout(pendingTap.timer); pendingTap=null;
+      dispatchBot(idx);
+      return;
+    }
+    if(pendingTap){ var p=pendingTap; clearTimeout(p.timer); pendingTap=null; fireSingle(p.idx); }
+    pendingTap={ idx:idx, timer:setTimeout(function(){ pendingTap=null; fireSingle(idx); }, 260) };
+  }
+  function isInteractiveTarget(t){
+    return !!(t && t.closest && t.closest('a,button,input,select,textarea,label,[role="button"],.hud,header,#botBubble,.view-tabs'));
+  }
+  var downInfo=null;
+  window.addEventListener('pointerdown', function(e){
+    if(e.button!=null && e.button>0){ downInfo=null; return; }
+    downInfo={ x:e.clientX, y:e.clientY, t:Date.now(), interactive:isInteractiveTarget(e.target) };
+  }, {passive:true});
+  window.addEventListener('pointerup', function(e){
+    if(!downInfo) return;
+    var di=downInfo; downInfo=null;
+    if(document.body.getAttribute('data-view')==='network') return;
+    if(di.interactive || isInteractiveTarget(e.target)) return;
+    var dx=e.clientX-di.x, dy=e.clientY-di.y;
+    if(dx*dx+dy*dy>196) return;      // moved: it was a scroll/drag, not a tap
+    if(Date.now()-di.t>600) return;  // long press, not a tap
+    handleTap(e.clientX, e.clientY);
+  }, {passive:true});
+  /* Probe/debug handle: lets QA tap a bot at its live rendered position. */
+  window.__swarmDebug={
+    bots:function(){ return bots; },
+    focus:function(){ return focusEl; },
+    crew:function(){ return crewIdxs.slice(); },
+    botPos:function(i){ var b=bots[i]; return b?{ x:b.x, y:b.y, mode:b.mode, trick:b.trick?b.trick.type:null }:null; },
+    tapAt:function(x,y){ handleTap(x,y); },
+    tapBot:function(i){ var b=bots[i]; if(b) handleTap(b.x, b.y); },
+    dispatch:function(i){ dispatchBot(i); },
+    bubble:function(){ return bubbleEl; },
+    decisions:function(){ return decisionLog.slice(); },
+    brain:function(){ return { pinned:pinnedBotIdx, watched:watchedBotIdx, shown:shownEvent, pulse:!!brainPulse }; },
+    pin:function(i){ pinBot(i); },
+    unpin:function(){ unpinBrain(); },
+    selected:function(){ return pinnedBotIdx; },
+    clearSelection:function(){ clearSelection(); },
+    view:function(){ return currentView; },
+    switchView:function(v){ switchView(v); },
+    pulses:function(){ return swarmPulses.slice(); },
+    panelStats:function(){ return computePanelStats(); },
+    serviceLog:function(){ return serviceLog.slice(); },
+    stars:function(){ return stars? stars.length : 0; },
+    components:function(){ return componentList.slice(); },
+    bubblePos:function(){ return bubbleEl? { left:bubbleEl.style.left, top:bubbleEl.style.top, show:bubbleEl.classList.contains('show'), staticPos:bubbleEl.getAttribute('data-static-pos') } : null; }
+  };
+
+  /* =====================================================================
+     PIXEL STARDUST + MICRO-JOBS ON FINISHED CONTAINERS
+     ---------------------------------------------------------------------
+     spawnDust(): small SQUARE particles (3–7px) in the bot's own colour
+     (plus occasional white/blue sparkles). Shed from moving bots at a
+     rate proportional to speed; they drift, float and shrink/fade over
+     ~0.5–1.1s. Hard-capped at ~200 live particles; none in reduced motion.
+     microWork(): the unit of "real work" a tweaker/patrol bot performs on
+     an already-built container. Bot glides to an exact spot -> the effect
+     plays UNDER it -> sparkle -> bot moves on. Two kinds:
+       (a) block recolor/rebuild — a 2x2/3x3 patch on the build pixel grid
+           dissolves into stardust, re-materialises in a new colour, and
+           the tint lingers a few seconds before easing back;
+       (b) letter tweak — one letter in the container's text is swapped
+           for a glitch glyph + colour/size flip while the bot hovers on
+           it, then restored EXACTLY (originals stored per character).
+     At most 2 micro-jobs run at once across the whole page.
+     ===================================================================== */
+  function spawnDust(x,y,c,n,spread,ivx,ivy){
+    if(reduced) return;
+    for(var i=0;i<n;i++){
+      if(dust.length>=200) return;
+      dust.push({
+        x:x+(Math.random()-0.5)*(spread||6), y:y+(Math.random()-0.5)*(spread||6),
+        vx:(Math.random()-0.5)*0.55+(ivx||0), vy:(Math.random()-0.5)*0.55+(ivy||0)-0.06,
+        s:3+Math.random()*4, t:performance.now(), life:520+Math.random()*580,
+        c: Math.random()<0.66 ? c : (Math.random()<0.5?'#ffffff':'#7db0ff')
+      });
+    }
+  }
+  function activeMicroCount(except){
+    var n=0; bots.forEach(function(o){ if(o!==except && o.micro) n++; }); return n;
+  }
+  var GLYPHS=['#','%','@','&','*','?','/','+','=','§'];
+  /* Lazily split ONE text node inside el into per-character spans so a
+     single letter can be tweaked. Spaces stay as plain text nodes, so the
+     element's textContent is preserved exactly and layout barely moves. */
+  function getCharSpans(el){
+    if(el._charSpans && el._charSpans.length && el._charSpans[0].isConnected) return el._charSpans;
+    var nodes=[];
+    var walker=document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode:function(n){
+      var p=n.parentNode;
+      if(!p || p.nodeType!==1) return NodeFilter.FILTER_REJECT;
+      if(p.tagName==='SCRIPT'||p.tagName==='STYLE'||p.tagName==='CANVAS') return NodeFilter.FILTER_REJECT;
+      if(p.classList && p.classList.contains('twk-ch')) return NodeFilter.FILTER_REJECT;
+      return /[A-Za-z]{3,}/.test(n.textContent||'') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }});
+    var nd; while((nd=walker.nextNode())) nodes.push(nd);
+    if(!nodes.length) return [];
+    var node=nodes[Math.floor(Math.random()*nodes.length)];
+    var parent=node.parentNode, text=node.textContent, frag=document.createDocumentFragment(), spans=[];
+    for(var i=0;i<text.length;i++){
+      var ch=text.charAt(i);
+      if(ch===' '||ch==='\n'||ch==='\t'){ frag.appendChild(document.createTextNode(ch)); continue; }
+      var s=document.createElement('span'); s.className='twk-ch'; s.textContent=ch; s.setAttribute('data-orig',ch);
+      frag.appendChild(s); spans.push(s);
+    }
+    parent.replaceChild(frag,node);
+    el._charSpans=spans;
+    return spans;
+  }
+  function applyLetter(job){
+    var s=job.span; if(!s || !s.isConnected) return;
+    job.applied=true;
+    var g=GLYPHS[Math.floor(Math.random()*GLYPHS.length)];
+    if(g===job.origChar) g='*';
+    s.textContent=g;
+    s.style.color=job.tint;
+    s.style.backgroundColor='rgba(47,123,255,.28)';
+    s.style.display='inline-block';
+    s.style.transform='scale(1.3)';
+  }
+  function restoreLetter(job, highlight){
+    var s=job.span; if(!s || !s.isConnected) return;
+    s.textContent=job.origChar; // content is never left corrupted
+    s.style.transform=''; s.style.backgroundColor=''; s.style.display='';
+    if(highlight){
+      s.style.color=highlight; // brief "set by the bot" highlight, then fades via CSS transition
+      setTimeout(function(){ if(s.isConnected) s.style.color=''; },750);
+    } else s.style.color='';
+    job.applied=false;
+  }
+  function cleanupMicro(b){
+    if(b.micro && b.micro.kind==='letter' && b.micro.applied) restoreLetter(b.micro,false);
+    b.micro=null;
+  }
+  function createMicroJob(b, el, now){
+    var rect=el.getBoundingClientRect();
+    if(rect.width<24 || rect.height<16) return null;
+    if(Math.random()<0.34){ // letter tweak, when the container has tweakable text
+      var spans=getCharSpans(el);
+      var free=spans.filter(function(s){
+        return s.isConnected && !bots.some(function(o){ return o.micro && o.micro.span===s; });
+      });
+      if(free.length){
+        var span=free[Math.floor(Math.random()*free.length)];
+        return { kind:'letter', el:el, span:span, origChar:span.getAttribute('data-orig')||span.textContent,
+                 tint:['#ff3b30','#ffd60a','#2dd4bf','#ff7a1a'][Math.floor(Math.random()*4)],
+                 start:now, dur:1250+Math.random()*450, applied:false, px:0, py:0 };
+      }
+    }
+    // block recolor/rebuild on the same ~9–13px pixel grid the builder uses
+    var gw=2+Math.floor(Math.random()*2), gh=2+Math.floor(Math.random()*2), cs=9+Math.random()*4;
+    var shades=[['#2f7bff','#5b97ff','#1f5fd0'],['#ff7a1a','#ff9a4d','#e05f00'],['#2dd4bf','#5eead4','#14b8a6'],
+                ['#ffd60a','#ffe14d','#f5b800'],['#ff6b9d','#ff8fb5','#ec407a'],['#4ade80','#86efac','#22c55e']][Math.floor(Math.random()*6)];
+    var cells=[];
+    for(var gy=0;gy<gh;gy++) for(var gx=0;gx<gw;gx++){
+      if(gw*gh>4 && gx===gw-1 && gy===0 && Math.random()<0.5) continue;
+      cells.push({dx:gx, dy:gy, c:shades[Math.floor(Math.random()*shades.length)]});
+    }
+    return { kind:'block', el:el, fx:0.14+Math.random()*0.68, fy:0.16+Math.random()*0.62,
+             gw:gw, gh:gh, cs:cs, cells:cells, start:now, dur:1350+Math.random()*450,
+             applied:false, px:0, py:0, lastDust:0 };
+  }
+  function finishMicroJob(b, now){
+    var job=b.micro; if(!job) return;
+    if(job.kind==='letter') restoreLetter(job, b.color);
+    else { // the recolored patch stays tinted a few seconds, then eases back
+      tints.push({ el:job.el, fx:job.fx, fy:job.fy, gw:job.gw, gh:job.gh, cs:job.cs, cells:job.cells, start:now, dur:3400+Math.random()*1600 });
+      if(tints.length>10) tints.shift();
+    }
+    for(var i=0;i<3;i++) sparks.push({ x:job.px+(Math.random()-0.5)*12, y:job.py+(Math.random()-0.5)*12, t:performance.now(), c:i?b.color:'#ffffff' });
+    spawnDust(job.px, job.py, b.color, 7, 16);
+    b.micro=null;
+    b.microNextAt=now+500+Math.random()*900; // next micro-job ~1.5–3s after this one started cycling
+  }
+  function drawBlockJob(job, rect, p){
+    var tw=job.gw*job.cs, th=job.gh*job.cs;
+    var ox=rect.left+job.fx*rect.width-tw/2, oy=rect.top+job.fy*rect.height-th/2, i, c;
+    ctx.save();
+    if(p<0.3){ // dissolve: original-ish blocks vanish piece by piece into stardust
+      var keep=Math.max(0, Math.floor(job.cells.length*(1-p/0.3)));
+      ctx.globalAlpha=0.85; ctx.fillStyle='#454e61';
+      for(i=0;i<keep;i++){ c=job.cells[(i*2)%job.cells.length]; ctx.fillRect(ox+c.dx*job.cs+0.5, oy+c.dy*job.cs+0.5, job.cs-1, job.cs-1); }
+      if(performance.now()-(job.lastDust||0)>70){ job.lastDust=performance.now(); spawnDust(job.px, job.py, '#9fb4d8', 2, tw); }
+    } else { // re-materialise in the new colour, cell by cell
+      var frac= p<0.72 ? (p-0.3)/0.42 : 1;
+      var n=Math.floor(job.cells.length*frac);
+      ctx.globalAlpha=0.92;
+      for(i=0;i<n;i++){ c=job.cells[i]; ctx.fillStyle=c.c; ctx.fillRect(ox+c.dx*job.cs+0.5, oy+c.dy*job.cs+0.5, job.cs-1, job.cs-1); }
+    }
+    ctx.restore(); ctx.globalAlpha=1;
+  }
+  /* One micro-job event: returns true while the bot is committed to a spot
+     (target set onto it, effect playing under it); false between jobs. */
+  function microWork(b, el, now){
+    if(b.micro && b.micro.el!==el) cleanupMicro(b);
+    if(!b.micro){
+      if(now<(b.microNextAt||0)) return false;
+      if(activeMicroCount(b)>=2){ b.microNextAt=now+650; return false; } // max ~2 containers at once
+      b.micro=createMicroJob(b, el, now);
+      if(!b.micro){ b.microNextAt=now+800; return false; }
+      logService(el); // patrol coverage: this bot just began real work on this section
+    }
+    var job=b.micro, rect=el.getBoundingClientRect();
+    if(job.kind==='letter'){
+      if(!job.span || !job.span.isConnected){ cleanupMicro(b); b.microNextAt=now+600; return false; }
+      var sr=job.span.getBoundingClientRect();
+      job.px=sr.left+sr.width/2; job.py=sr.top+sr.height/2;
+      if(!job.applied) applyLetter(job);
+    } else {
+      job.px=rect.left+job.fx*rect.width; job.py=rect.top+job.fy*rect.height;
+    }
+    b.tx=job.px+Math.sin(now*0.009+b.phase)*3;
+    b.ty=job.py-11+Math.cos(now*0.011+b.phase)*3;
+    var p=(now-job.start)/job.dur;
+    if(job.kind==='block') drawBlockJob(job, rect, Math.min(1,p));
+    if(p>=1) finishMicroJob(b, now);
+    return true;
+  }
+  function drawMicroTints(now){
+    tints=tints.filter(function(t){ return now-t.start<t.dur && t.el && t.el.isConnected; });
+    tints.forEach(function(t){
+      var rect=t.el.getBoundingClientRect();
+      if(rect.bottom<-40 || rect.top>H+40) return;
+      var pr=(now-t.start)/t.dur;
+      var alpha= pr<0.75 ? 0.8 : 0.8*(1-(pr-0.75)/0.25);
+      var tw=t.gw*t.cs, th=t.gh*t.cs;
+      var ox=rect.left+t.fx*rect.width-tw/2, oy=rect.top+t.fy*rect.height-th/2;
+      ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle='#fff';
+      t.cells.forEach(function(c){ ctx.fillStyle=c.c; ctx.fillRect(ox+c.dx*t.cs+0.5, oy+c.dy*t.cs+0.5, t.cs-1, t.cs-1); });
+      ctx.restore();
+    });
+    ctx.globalAlpha=1;
+  }
+
+  function drawBot(b,now){
+    var bob=Math.sin(now*0.004+b.phase)*1.7;
+    var wobble=Math.sin(now*0.0032+b.phase)*0.09;
+    var s=b.size;
+    /* tap-trick + neighbour-reaction transforms (visual only — the bot's
+       job target is untouched, so it resumes its work right after) */
+    var tRot=wobble, tDy=bob, tSx=1, tSy=1, happy=false, antX=0;
+    if(b.react){
+      if(now<b.react.until){
+        var rp=(now-b.react.start)/Math.max(1,(b.react.until-b.react.start));
+        if(b.react.type==='hop') tDy-=Math.sin(rp*Math.PI)*5;
+        else tRot+=(b.react.lean||1)*0.2*Math.sin(rp*Math.PI);
+      } else b.react=null;
+    }
+    if(b.trick){
+      var tp=(now-b.trick.start)/b.trick.dur;
+      if(b.trick.type==='loop'){ if(tp<1) tRot+=tp*Math.PI*2; }
+      else if(tp>=1) b.trick=null;
+      else if(b.trick.type==='spin') tRot+=tp*Math.PI*2;
+      else if(b.trick.type==='hop'){ tDy-=Math.sin(tp*Math.PI)*17; var sq=Math.sin(tp*Math.PI); tSx=1+0.16*sq; tSy=1-0.13*sq; }
+      else if(b.trick.type==='wave'){ happy=true; antX=Math.sin(tp*Math.PI*5)*3.4; tDy-=Math.sin(tp*Math.PI)*3; }
+    }
+    ctx.save(); ctx.translate(b.x,b.y+tDy); ctx.rotate(tRot); ctx.scale(tSx,tSy);
+    // antenna
+    ctx.strokeStyle=b.color; ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.moveTo(0,-s*0.42); ctx.lineTo(antX,-s*0.68); ctx.stroke();
+    ctx.beginPath(); ctx.arc(antX,-s*0.74,2.3,0,7); ctx.fillStyle=b.color; ctx.fill();
+    ctx.lineWidth=.7; ctx.strokeStyle='rgba(0,0,0,.55)'; ctx.stroke();
+    // ears
+    ctx.fillStyle=b.color;
+    ctx.fillRect(-s*0.60,-s*0.10,3.2,s*0.26);
+    ctx.fillRect(s*0.60-3.2,-s*0.10,3.2,s*0.26);
+    // head — rounded square
+    var hw=s, hh=s*0.84, x=-hw/2, y=-hh/2, r=5.5;
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+hw,y,x+hw,y+hh,r); ctx.arcTo(x+hw,y+hh,x,y+hh,r); ctx.arcTo(x,y+hh,x,y,r); ctx.arcTo(x,y,x+hw,y,r); ctx.closePath();
+    ctx.fillStyle=b.color; ctx.fill();
+    ctx.lineWidth=1; ctx.strokeStyle='rgba(0,0,0,.65)'; ctx.stroke();
+    // eyes (blink — or happy closed arcs during an antenna-wave trick)
+    var blink=((now+b.blinkOffset)%3400)<130;
+    if(happy){
+      ctx.strokeStyle='#0b0b0d'; ctx.lineWidth=1.5; ctx.lineCap='round';
+      ctx.beginPath(); ctx.arc(-s*0.23,0,2.6,Math.PI*1.08,Math.PI*1.92); ctx.stroke();
+      ctx.beginPath(); ctx.arc(s*0.23,0,2.6,Math.PI*1.08,Math.PI*1.92); ctx.stroke();
+    } else if(blink){
+      ctx.fillStyle='#0b0b0d';
+      ctx.fillRect(-s*0.23-2.3,-0.8,4.6,1.5);
+      ctx.fillRect(s*0.23-2.3,-0.8,4.6,1.5);
+    } else {
+      ctx.fillStyle='#0b0b0d';
+      ctx.beginPath(); ctx.arc(-s*0.23,-s*0.05,2.5,0,7); ctx.arc(s*0.23,-s*0.05,2.5,0,7); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.95)';
+      ctx.beginPath(); ctx.arc(-s*0.23+0.9,-s*0.05-0.9,0.85,0,7); ctx.arc(s*0.23+0.9,-s*0.05-0.9,0.85,0,7); ctx.fill();
+    }
+    // smile
+    ctx.strokeStyle='#0b0b0d'; ctx.lineWidth=1.25; ctx.lineCap='round';
+    ctx.beginPath(); ctx.arc(0,s*0.10,s*0.19,0.18*Math.PI,0.82*Math.PI); ctx.stroke();
+    ctx.restore();
+  }
+
+  function loop(now){
+    ctx.clearRect(0,0,W,H);
+    var focusRect=null, focusRawRect=null;
+    if(focusEl){ var fr=focusEl.getBoundingClientRect(); focusRawRect=fr; if(fr.bottom>-60 && fr.top<H+60) focusRect=fr; }
+    if(focusEl && focusEl!==lastFocusEl) assignSlots(focusEl);
+    if(!focusEl) lastFocusEl=null;
+    var bursting = burstPoint && Date.now()<burstUntil;
+    var crewCount=crewIdxs.length||CORE_CREW;
+    if(!loop._hudAt || now-loop._hudAt>500){ loop._hudAt=now; updateCrewHud(); }
+    updateBubble(now); // STATIC pop-up: only its live text refreshes, position never moves
+    if(currentView==='network'){ // honest measured render FPS from this rAF loop
+      _fpsFrames++; var _fn=performance.now();
+      if(_fn-_fpsLast>=1000){ renderFps=Math.round(_fpsFrames*1000/(_fn-_fpsLast)); _fpsFrames=0; _fpsLast=_fn; }
+      drawSwarmNetwork(now);
+    }
+    if(!loop._brainAt || now-loop._brainAt>2000){ loop._brainAt=now;
+      document.querySelectorAll('#brainFeedList .feed-row').forEach(function(rw){
+        var tEl=rw.querySelector('.feed-time'); var ts0=parseInt(rw.getAttribute('data-ts')||'0',10);
+        if(tEl && ts0) tEl.textContent=relTime(ts0);
+      });
+      if(watchedBotIdx>=0 || shownEvent) updateBrainHeader();
+      renderDetailStrip();
+    }
+
+    // dashed selection rect + handles drawn on canvas around the focus element (marching ants)
+    if(focusRect && !reduced){
+      ctx.save();
+      ctx.strokeStyle='rgba(47,123,255,.55)'; ctx.lineWidth=1; ctx.setLineDash([5,5]);
+      ctx.lineDashOffset=-(now*0.03)%10;
+      ctx.strokeRect(focusRect.left-13,focusRect.top-13,focusRect.width+26,focusRect.height+26);
+      ctx.setLineDash([]);
+      ctx.fillStyle='#2f7bff';
+      [[-13,-13],[focusRect.width+13,-13],[-13,focusRect.height+13],[focusRect.width+13,focusRect.height+13]].forEach(function(o){
+        ctx.fillRect(focusRect.left+o[0]-3,focusRect.top+o[1]-3,6,6);
+      });
+      ctx.restore();
+    }
+
+    // home base marker — a faint staging ring, visible while the swarm is parked / returning
+    if(!focusRect && !bursting && !reduced){
+      var hc=homeCenter();
+      ctx.save();
+      ctx.strokeStyle='rgba(47,123,255,.28)'; ctx.lineWidth=1; ctx.setLineDash([4,6]);
+      ctx.lineDashOffset=(now*0.012)%10;
+      ctx.beginPath(); ctx.ellipse(hc.x,hc.y,104,58,0,0,Math.PI*2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font='600 8px "JetBrains Mono", monospace'; ctx.fillStyle='rgba(125,176,255,.75)';
+      ctx.fillText('BOT BASE', hc.x-22, hc.y-66);
+      ctx.restore();
+    }
+
+    // faint outline around elements being tweaked, in the tweaker's colour
+    if(!reduced){
+      bots.forEach(function(b){
+        var el2 = b.mode==='tweaking' ? b.tweakEl : (b.mode==='patrol' ? b.patrolEl : null);
+        if(!el2) return;
+        var tr2=el2.getBoundingClientRect();
+        if(tr2.bottom<-40||tr2.top>H+40) return;
+        ctx.save();
+        ctx.strokeStyle=b.color; ctx.globalAlpha=(b.mode==='tweaking'?0.4:0.18); ctx.lineWidth=1; ctx.setLineDash([3,5]);
+        ctx.lineDashOffset=(now*0.02)%8;
+        ctx.strokeRect(tr2.left-5,tr2.top-5,tr2.width+10,tr2.height+10);
+        ctx.restore();
+      });
+    }
+
+    // lingering recolored patches from finished micro-jobs, easing back
+    if(!reduced) drawMicroTints(now);
+
+    // PIXEL STARDUST render: squares drift, float and shrink/fade out
+    if(dust.length){
+      dust=dust.filter(function(pt){ return now-pt.t<pt.life; });
+      dust.forEach(function(pt){
+        var age=(now-pt.t)/pt.life;
+        pt.x+=pt.vx; pt.y+=pt.vy; pt.vx*=0.985; pt.vy*=0.985;
+        var sz=Math.max(0.6, pt.s*(1-age*0.8));
+        ctx.globalAlpha=(1-age)*0.85; ctx.fillStyle=pt.c;
+        ctx.fillRect(pt.x-sz/2, pt.y-sz/2, sz, sz);
+      });
+      ctx.globalAlpha=1;
+    }
+
+    bots.forEach(function(b,idx){
+      // a bot that just became free (tweaker released, crew rotated) picks up
+      // patrol duty on older work within a second — checked at most 1×/s each
+      if(b.mode==='base' && focusEl && builtEls.length && now-(b._standbyAt||0)>1000){ b._standbyAt=now; assignPatrol(b,idx); }
+      // overexcited loop-the-loop: fly a full circle around the tap point
+      // shedding rich stardust, then settle back at the anchor and resume
+      if(b.trick && b.trick.type==='loop'){
+        var lp=(now-b.trick.start)/b.trick.dur;
+        if(lp>=1){ b.x=b.trick.cx; b.y=b.trick.cy; b.vx=0; b.vy=0; b.trick=null; }
+        else {
+          var la=-Math.PI/2+lp*Math.PI*2, lr=b.trick.r||37;
+          b.x=b.trick.cx+Math.cos(la)*lr; b.y=b.trick.cy+Math.sin(la)*lr*0.85;
+          if(!reduced && Math.random()<0.8) spawnDust(b.x, b.y+6, b.color, 1, 5);
+          drawBot(b,now);
+          return;
+        }
+      }
+      // decide target
+      if(bursting && idx<10 && b.mode!=='tweaking'){
+        var a=(idx/10)*Math.PI*2 + now*0.001 + b.phase;
+        b.tx=burstPoint.x+Math.cos(a)*(44+b.orbitRadius*2); b.ty=burstPoint.y+Math.sin(a)*(30+b.orbitRadius);
+      } else if(b.mode==='tweaking' && b.tweakEl){
+        /* ---- TWEAKING a finished element while the crew builds elsewhere ----
+           Slow orbit/pat around it; every so often a pixel pops out of place
+           (or a polish sweep / tiny nudge is due) and the bot flies to that
+           exact spot and knocks it back in with a sparkle. Re-decides every
+           ~1.2s via jevDecide with a rising chance of leaving; hard-capped
+           by tweakUntil (~5s). Runs on timestamps only, never per frame. */
+        var tel=b.tweakEl, tr=tel.getBoundingClientRect();
+        if(now>=b.tweakUntil || tr.bottom<-260 || tr.top>H+260){
+          releaseTweaker(b,idx);
+          b.tx=(b.homeX||homeCenter().x); b.ty=(b.homeY||homeCenter().y);
+        } else {
+          if(now>=b.tweakNextCheck){
+            b.tweakNextCheck=now+2600;
+            var age=(now-b.tweakStart)/Math.max(1,(b.tweakUntil-b.tweakStart));
+            var dd=jevDecide(b,{ phase:'tweak', tweakAge:age, nextWaiting:!!focusEl, currentAssignment:'tweaking', botIdx:idx, el:tel, area:(tel.offsetWidth||0)*(tel.offsetHeight||0), desired:currentDesired, completePct:1 });
+            if(dd.action!=='stay_tweak') releaseTweaker(b,idx);
+          }
+          if(b.mode!=='tweaking'){
+            b.tx=(b.homeX||homeCenter().x); b.ty=(b.homeY||homeCenter().y);
+          } else {
+            if(!microWork(b, tel, now)){
+              var oa=now*0.00055*b.orbitDir+b.phase; // slow pat/orbit between micro-jobs
+              b.tx=tr.left+tr.width/2+Math.cos(oa)*(tr.width/2+16);
+              b.ty=tr.top+tr.height/2+Math.sin(oa)*(tr.height/2+13);
+              if(Math.random()<0.02) spawnDust(b.x, b.y-10, b.color, 1, 10);
+            }
+          }
+        }
+      } else if(b.mode==='patrol' && b.patrolEl){
+        /* ---- PATROLLING older, already-built containers ----
+           The standing answer to "nobody stays behind": standby bots rotate
+           slowly through finished pieces, orbiting gently and flying in to
+           fix a little pixel fault every few seconds, for a long stint
+           (6.5–12s) before rotating to the next-oldest container. */
+        var pel=b.patrolEl, pr2=pel.getBoundingClientRect();
+        if(now>=b.patrolUntil){ assignPatrol(b,idx); pel=b.patrolEl; if(pel) pr2=pel.getBoundingClientRect(); }
+        if(b.mode!=='patrol' || !pel){
+          b.tx=(b.homeX||homeCenter().x); b.ty=(b.homeY||homeCenter().y);
+        } else if(pr2.bottom<-240 || pr2.top>H+240){
+          // its container is off-screen for now: wait at base, fly back when it returns
+          b.tx=(b.homeX||homeCenter().x)+(b.homeJitterX||0);
+          b.ty=(b.homeY||homeCenter().y)+(b.homeJitterY||0);
+        } else {
+          if(!microWork(b, pel, now)){
+            var poa=now*0.0005*b.orbitDir+b.phase; // slow patrol orbit between micro-jobs
+            b.tx=pr2.left+pr2.width/2+Math.cos(poa)*(pr2.width/2+15);
+            b.ty=pr2.top+pr2.height/2+Math.sin(poa)*(pr2.height/2+12);
+          }
+        }
+      } else if(focusRect && b.mode==='building'){
+        if(buildFront && buildFront.el===focusEl){
+          // WORK THE PIXEL FRONTIER: most of the crew rides the moving build edge
+          // where new blocks are appearing; every 7th bot holds a corner instead.
+          // All offsets are the bot's PERSISTENT ones (frontOff / jitter), and the
+          // working wobble is slow and small — the crew tracks the front smoothly
+          // instead of vibrating around it.
+          var forb=now*b.orbitSpeed*0.55*b.orbitDir+b.phase;
+          if(b.slotIdx%7===3){
+            var fc=[[focusRect.left-16,focusRect.top-16],[focusRect.left+focusRect.width+16,focusRect.top-16],[focusRect.left-16,focusRect.top+focusRect.height+16],[focusRect.left+focusRect.width+16,focusRect.top+focusRect.height+16]];
+            var cp=fc[Math.floor(b.slotIdx/7)%4];
+            b.tx=cp[0]+Math.cos(forb)*b.orbitRadius*0.6;
+            b.ty=cp[1]+Math.sin(forb)*b.orbitRadius*0.6;
+          } else {
+            var fax=focusRect.left+buildFront.fx*focusRect.width;
+            var fay=focusRect.top+buildFront.fy*focusRect.height;
+            var fspread=Math.min(Math.max(focusRect.height*0.6,26),84);
+            var ft2=(b.frontOff!=null?b.frontOff:0.5);
+            b.tx=fax+((b.slotIdx%4===0)?-24:6)+(b.slotJitterX||0)*0.4+Math.cos(forb)*b.orbitRadius+Math.sin(now*0.0026+b.phase)*b.workJiggle*0.5;
+            b.ty=fay+(ft2-0.5)*fspread+(b.slotJitterY||0)*0.35+Math.sin(forb)*b.orbitRadius*0.7+Math.cos(now*0.0031+b.phase)*b.workJiggle*0.5;
+          }
+        } else {
+        // cluster around the perimeter at the bot's persistent station (frontOff),
+        // so a crew-size change mid-section never teleports anyone to a new side
+        var per=(b.frontOff!=null?b.frontOff:(b.slotIdx||0)/Math.max(crewCount,1));
+        var px,py;
+        if(per<0.3){ px=focusRect.left+ (per/0.3)*focusRect.width; py=focusRect.top-22; }
+        else if(per<0.5){ px=focusRect.left+focusRect.width+22; py=focusRect.top+((per-0.3)/0.2)*focusRect.height; }
+        else if(per<0.8){ px=focusRect.left+focusRect.width-((per-0.5)/0.3)*focusRect.width; py=focusRect.top+focusRect.height+22; }
+        else { px=focusRect.left-22; py=focusRect.top+focusRect.height-((per-0.8)/0.2)*focusRect.height; }
+        var orb=now*b.orbitSpeed*0.55*b.orbitDir+b.phase;
+        b.tx=px + (b.slotJitterX||0)*0.45 + Math.cos(orb)*b.orbitRadius + Math.sin(now*0.0026+b.phase)*b.workJiggle*0.5;
+        b.ty=py + (b.slotJitterY||0)*0.45 + Math.sin(orb)*b.orbitRadius*0.7 + Math.cos(now*0.0031+b.phase)*b.workJiggle*0.5;
+        }
+      } else if(focusRect){
+        // HELPER: not on this crew and nothing built to patrol yet — hover on a
+        // wide, slow ring around the live build instead of sitting idle at base.
+        var ha2=now*0.0002*b.orbitDir+(b.helperAng!=null?b.helperAng:b.phase);
+        var hd=(b.helperDist||70);
+        b.tx=focusRect.left+focusRect.width/2+Math.cos(ha2)*(focusRect.width/2+hd);
+        b.ty=focusRect.top+focusRect.height/2+Math.sin(ha2)*(focusRect.height/2+hd*0.7);
+      } else if(focusEl && focusRawRect){
+        // BUILD TARGET IS OFF-SCREEN (user scrolled fast, build not yet
+        // pre-empted): don't park at base looking idle — stage along the
+        // screen edge nearest the work, ready to dive straight in.
+        var edgeY = focusRawRect.top<0 ? 66 : Math.max(66,H-92);
+        var spreadX = 90 + ((b.frontOff!=null?b.frontOff:(idx%9)/8) * Math.max(120,W-180));
+        b.tx=spreadX + Math.sin(now*0.0016+b.phase)*10;
+        b.ty=edgeY + Math.cos(now*0.0019+b.phase)*7;
+      } else if(b.mode==='building' && b.dispatchEl){
+        // DOUBLE-TAP DISPATCH in transit: a section was enqueued but its
+        // first piece hasn't become the focus yet — stage on the target
+        // itself instead of drifting home, ready to join the frontier.
+        var dr2=b.dispatchEl.getBoundingClientRect();
+        b.tx=dr2.left+dr2.width/2+(b.slotJitterX||0)*0.4;
+        b.ty=Math.max(70, Math.min(H-80, dr2.top+Math.min(dr2.height/2,120)));
+      } else {
+        // HOME: park in the staging cluster and idle-bob there until the next build.
+        // A couple of scouts drift a little wider around home; nobody scatters over the page.
+        if(idx%7===0){
+          if(now>b.idleAt) pickIdle(b,now);
+          b.tx=b.idleTx; b.ty=b.idleTy;
+        } else {
+          b.tx=(b.homeX||homeCenter().x)+(b.homeJitterX||0)+Math.sin(now*b.homeBobSpeed+b.phase)*(b.homeBobAmp||3);
+          b.ty=(b.homeY||homeCenter().y)+(b.homeJitterY||0)+Math.cos(now*b.homeBobSpeed*1.17+b.phase)*(b.homeBobAmp||3);
+        }
+      }
+      // movement — smooth glide: velocity eases toward the target (critically
+      // damped), capped per frame, with only a gentle static curve bending the
+      // path. No time-oscillating sway and no per-frame position jitter — that
+      // combination was what made the swarm jump around.
+      var dx=b.tx-b.x, dy=b.ty-b.y;
+      var dist=Math.sqrt(dx*dx+dy*dy)||0.001;
+      var arcAmt=b.arc * Math.min(dist,130) * 0.05;
+      var bend=Math.sin(Math.min(dist/150,1)*Math.PI*0.5);
+      var perpX=(-dy/dist)*arcAmt*bend, perpY=(dx/dist)*arcAmt*bend;
+      var maxV=(focusRect||bursting)?8.5:6;
+      if(now<(b.boostUntil||0)) maxV*=1.75; // double-tap speed burst
+      var desVx=(dx+perpX)*0.05*b.speed, desVy=(dy+perpY)*0.05*b.speed;
+      var dl=Math.sqrt(desVx*desVx+desVy*desVy);
+      if(dl>maxV){ desVx*=maxV/dl; desVy*=maxV/dl; }
+      b.vx=(b.vx||0)+(desVx-(b.vx||0))*0.07;
+      b.vy=(b.vy||0)+(desVy-(b.vy||0))*0.07;
+      b.x+=b.vx; b.y+=b.vy;
+      // PIXEL STARDUST: square particles shed while moving — spawn rate scales
+      // with speed, so fast travel streams pixels and a slow hover barely sheds
+      if(!reduced){
+        var spd=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+        b.dustAcc=(b.dustAcc||0)+spd*0.06*(now<(b.boostUntil||0)?2.4:1);
+        if(spd<0.35 && Math.random()<0.005) b.dustAcc+=1; // sparse pixels while hovering/working
+        while(b.dustAcc>=1){ b.dustAcc-=1; spawnDust(b.x+(Math.random()-0.5)*5, b.y+b.size*0.34, b.color, 1, 4, -b.vx*0.06, -b.vy*0.06); }
+      }
+      drawBot(b,now);
+      if(idx<5){ ctx.font='600 8px "JetBrains Mono", monospace'; ctx.fillStyle=b.color; ctx.fillText('bot-'+String(idx+1).padStart(2,'0'), b.x+13, b.y+3); }
+    });
+    // SELECTED BOT HALO — persistent highlight (bot colour, slow pulse) until another bot is tapped or the user taps away
+    if(pinnedBotIdx>=0 && bots[pinnedBotIdx] && currentView!=='network'){
+      var sb=bots[pinnedBotIdx];
+      var pulseR=sb.size*0.95+5+Math.sin(now*0.005)*2.5;
+      ctx.save();
+      ctx.strokeStyle=sb.color; ctx.globalAlpha=0.35; ctx.lineWidth=6;
+      ctx.beginPath(); ctx.arc(sb.x, sb.y, pulseR+3, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha=0.95; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(sb.x, sb.y, pulseR, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha=1; ctx.fillStyle=sb.color;
+      ctx.beginPath(); ctx.moveTo(sb.x-5, sb.y-pulseR-14); ctx.lineTo(sb.x+5, sb.y-pulseR-14); ctx.lineTo(sb.x, sb.y-pulseR-6); ctx.closePath(); ctx.fill();
+      ctx.font='700 8px "JetBrains Mono", monospace'; ctx.fillText(botId(pinnedBotIdx), sb.x+pulseR+5, sb.y+3);
+      ctx.restore();
+    }
+    // sparkles flashing on the newest pixels the crew just placed
+    var sn=performance.now();
+    sparks=sparks.filter(function(sp){ return sn-sp.t<300; });
+    sparks.forEach(function(sp){
+      var sa=1-(sn-sp.t)/300, sz=2+(1-sa)*2.5;
+      ctx.globalAlpha=sa*0.9; ctx.fillStyle=sp.c||'#cfe4ff';
+      ctx.fillRect(sp.x-sz/2, sp.y-sz/2, sz, sz);
+    });
+    ctx.globalAlpha=1;
+    raf=requestAnimationFrame(loop);
+  }
+
+  /* ---------- Build orchestration ---------- */
+  var sections=Array.prototype.slice.call(document.querySelectorAll('.build-section'));
+  var allItems=Array.prototype.slice.call(document.querySelectorAll('.build-item'));
+  var totalItems=allItems.length, builtItems=0, builtSections=0;
+  var builtSteps=0, totalSteps=0, sectionSteps={};
+  var hudBar=document.getElementById('hudBar'), hudPct=document.getElementById('hudPct');
+  var hudSection=document.getElementById('hudSection'), hudMain=document.getElementById('hudMain');
+  var generation=0; // bumped on replay to abort in-flight builds
+  var queue=[], building=false;
+  var state={}; sections.forEach(function(s){ state[s.id]='pending'; });
+  var sectionCursor={}; sections.forEach(function(s){ sectionCursor[s.id]=0; }); // next unbuilt step per section, so a pre-empted build resumes where it stopped
+
+  /* ---- Fast-scroll handling: the queue follows the reader ----
+     A section is "near" when any real part of it is in the viewport, and
+     "far" when it is a full screen or more away. Queued sections are kept
+     sorted by distance to the viewport centre so the section the reader
+     is actually looking at always builds next. */
+  function sectionNearView(s){ var r=s.getBoundingClientRect(); return r.bottom>80 && r.top<window.innerHeight-80; }
+  function sectionFarFromView(s){ var r=s.getBoundingClientRect(); return r.bottom<-window.innerHeight*0.9 || r.top>window.innerHeight*1.9; }
+  function sortQueueByView(){
+    queue.sort(function(a,b){
+      var ra=a.getBoundingClientRect(), rb=b.getBoundingClientRect();
+      var da=Math.abs(ra.top+ra.height/2-window.innerHeight/2);
+      var db=Math.abs(rb.top+rb.height/2-window.innerHeight/2);
+      return da-db;
+    });
+  }
+
+  function updateHUD(buildingName){
+    var pct= totalSteps? Math.round(builtSteps/totalSteps*100) : (totalItems? Math.round(builtItems/totalItems*100):0);
+    hudBar.style.width=pct+'%'; hudPct.textContent=pct+'%';
+    if(builtSections>=sections.length){
+      hudMain.textContent='Swarm build — complete';
+      hudSection.textContent=' · All '+sections.length+' sections built by the swarm ✓';
+    } else if(buildingName){
+      hudMain.textContent='Swarm build';
+      hudSection.textContent=' · Building: '+buildingName+' · '+builtSections+'/'+sections.length+' sections done';
+    } else {
+      hudMain.textContent='Swarm build';
+      hudSection.textContent=' · Bots at base · '+builtSections+'/'+sections.length+' sections built — scroll for more';
+    }
+  }
+
+  function addCorners(el){
+    if(el.querySelector('.corner')) return;
+    [[ 'left:-11px;top:-11px'],['right:-11px;top:-11px'],['left:-11px;bottom:-11px'],['right:-11px;bottom:-11px']].forEach(function(pos){
+      var c=document.createElement('span'); c.className='corner';
+      pos[0].split(';').forEach(function(kv){ var p=kv.split(':'); if(p[0]) c.style[p[0].trim()]=p[1].trim(); });
+      // corners are positioned relative to the ::after inset (-8px), offset slightly outward
+      el.appendChild(c);
+    });
+  }
+  function removeCorners(el){ el.querySelectorAll('.corner').forEach(function(c){c.remove()}); }
+
+  /* ---------- Inner-component decomposition ----------
+     Every outer build-item is broken into sequential sub-steps: frame first,
+     then heading (word by word), text blocks, chips/tags, buttons, links —
+     so the bots re-cluster onto each INNER piece as it is built. */
+  var stepTargets=[];
+  function hideSub(el){ if(stepTargets.indexOf(el)<0) stepTargets.push(el); el.classList.add('sub-hidden'); }
+  function splitWords(el){
+    var words=[];
+    (function walk(node){
+      Array.prototype.slice.call(node.childNodes).forEach(function(ch){
+        if(ch.nodeType===3){
+          if(!ch.textContent.trim()) return;
+          var frag=document.createDocumentFragment();
+          ch.textContent.split(/(\s+)/).forEach(function(part){
+            if(!part) return;
+            if(/^\s+$/.test(part)) frag.appendChild(document.createTextNode(' '));
+            else { var s=document.createElement('span'); s.className='wstep'; s.textContent=part; frag.appendChild(s); words.push(s); }
+          });
+          node.replaceChild(frag,ch);
+        } else if(ch.nodeType===1 && ch.tagName!=='BR'){ walk(ch); }
+      });
+    })(el);
+    words.forEach(hideSub);
+    return words;
+  }
+  function pushStep(steps,target,kind){ steps.push({target:target,kind:kind}); }
+  function collectSteps(node, steps, isRoot){
+    var tag=node.tagName, cls=node.classList;
+    function kids(){ return Array.prototype.slice.call(node.children); }
+    if(node.id==='mockBox'){ mockSteps(node, steps); return; }
+    if(node.id==='brainPanel'){ pushStep(steps,node,'frame'); return; }
+    if(node.id==='toothGrid'){ pushStep(steps,node,'teeth'); return; }
+    if(tag==='H1'||tag==='H2'||tag==='H3'){
+      if(isRoot) pushStep(steps,node,'reveal');
+      splitWords(node).forEach(function(w){ pushStep(steps,w,'word'); });
+      return;
+    }
+    if(cls.contains('tags')||cls.contains('btn-row')||cls.contains('stat-row')||tag==='UL'||cls.contains('hero-meta')||cls.contains('proj-tabs')){
+      pushStep(steps,node,'reveal');
+      var kind=cls.contains('stat-row')?'stat':'chip';
+      kids().forEach(function(k){ hideSub(k); pushStep(steps,k,kind); });
+      return;
+    }
+    if(tag==='P'||tag==='A'||tag==='H4'||cls.contains('num')||cls.contains('mock-bar')){
+      if(!isRoot) hideSub(node);
+      pushStep(steps,node,'block');
+      return;
+    }
+    if(cls.contains('mock-side')||cls.contains('mock-main')){
+      hideSub(node); pushStep(steps,node,'frame');
+      if(cls.contains('mock-main')) kids().forEach(function(k){ collectSteps(k, steps, false); });
+      return;
+    }
+    if(node.style && node.style.background){ // surfaced inner panel (mock info cards)
+      if(!isRoot) hideSub(node);
+      pushStep(steps,node,'block');
+      return;
+    }
+    // generic container / wrapper / leaf
+    var kidsArr=kids();
+    var worthy=kidsArr.some(function(k){ return k.tagName!=='SPAN'; });
+    if(!worthy){
+      if(!isRoot) hideSub(node);
+      pushStep(steps,node,'block');
+      return;
+    }
+    var framed=isRoot && (node.hasAttribute('data-box')||cls.contains('white-card'));
+    if(framed) pushStep(steps,node,'frame');
+    else if(isRoot) pushStep(steps,node,'reveal');
+    kidsArr.forEach(function(k){ collectSteps(k, steps, false); });
+  }
+  function mockSteps(item, steps){
+    pushStep(steps,item,'frame');
+    var bar=item.querySelector('.mock-bar'); hideSub(bar); pushStep(steps,bar,'block');
+    var side=item.querySelector('.mock-side'); hideSub(side); pushStep(steps,side,'frame');
+    var main=item.querySelector('.mock-main'); hideSub(main); pushStep(steps,main,'frame');
+    Array.prototype.slice.call(main.children).forEach(function(k){ collectSteps(k, steps, false); });
+  }
+
+  /* ---------- Pixel-by-pixel reveal ----------
+     The element is shown in its real built state, covered by a grid of small
+     square "unbuilt" blocks. Blocks clear progressively — a rough
+     left-to-right / top-to-bottom front with jitter — while buildFront keeps
+     the bot crew riding the edge where new pixels are appearing. */
+  var DUR={
+    frame:function(el){ var a=el.offsetWidth*el.offsetHeight; return Math.round(780+Math.min(520,a/1500)+Math.random()*220); },
+    block:function(){ return Math.round(660+Math.random()*280); },
+    word:function(){ return Math.round(440+Math.random()*170); },
+    chip:function(){ return Math.round(380+Math.random()*160); },
+    stat:function(){ return Math.round(500+Math.random()*200); }
+  };
+  function pixelBuild(el, durMs, gen){
+    return new Promise(function(resolve){
+      var w=el.offsetWidth, h=el.offsetHeight;
+      if(!w||!h||durMs<=0){ resolve(); return; }
+      el.classList.add('pix-host');
+      var light=!!el.closest('.white-card');
+      var cell=Math.max(8, Math.min(14, Math.round(Math.sqrt((w*h)/1100))));
+      var cols=Math.max(1,Math.ceil(w/cell)), rows=Math.max(1,Math.ceil(h/cell));
+      var cv=document.createElement('canvas'); cv.className='pixveil'; cv.width=cols; cv.height=rows;
+      var cx=cv.getContext('2d');
+      var pal= light? ['#d7d7d7','#e1e1e1','#cdcdcd','#d2d2d2','#c7d2e4','#dde3ec']
+                    : ['#070709','#0a0a0e','#090a10','#0c0e14','#0d1524','#0a1220'];
+      var cells=[];
+      for(var r=0;r<rows;r++) for(var c=0;c<cols;c++){
+        cx.fillStyle=pal[Math.floor(Math.random()*pal.length)]; cx.fillRect(c,r,1,1);
+        var kx=cols>1?c/(cols-1):0, ky=rows>1?r/(rows-1):0;
+        cells.push({c:c,r:r,k:kx*0.68+ky*0.32+(Math.random()-0.5)*0.17});
+      }
+      cells.sort(function(a,b){ return a.k-b.k; });
+      el.appendChild(cv);
+      var start=performance.now(), idx=0, total=cells.length;
+      var sFx=null, sFy=null; // smoothed frontier — the crew rides this, never the raw batch average
+      function frame(now){
+        if(gen!==generation){ cv.remove(); if(buildFront&&buildFront.el===el) buildFront=null; resolve(); return; }
+        var p=Math.min(1,(now-start)/durMs);
+        var target=Math.floor(total*(p<0.12? p*0.7 : p));
+        var batch=[];
+        while(idx<target){ var cl=cells[idx++]; cx.clearRect(cl.c,cl.r,1,1); batch.push(cl); }
+        if(batch.length){
+          var rect=el.getBoundingClientRect(), sx=0, sy=0;
+          batch.forEach(function(cl){ sx+=cl.c; sy+=cl.r; });
+          var rawFx=(sx/batch.length+0.5)/cols, rawFy=(sy/batch.length+0.5)/rows;
+          if(sFx===null){ sFx=rawFx; sFy=rawFy; } else { sFx+=(rawFx-sFx)*0.35; sFy+=(rawFy-sFy)*0.35; }
+          buildFront={el:el, fx:sFx, fy:sFy};
+          var stepN=Math.max(1,Math.floor(batch.length/6));
+          for(var i=0;i<batch.length;i+=stepN){
+            if(sparks.length>90) break;
+            var cl2=batch[i];
+            sparks.push({x:rect.left+(cl2.c+0.5)*(rect.width/cols), y:rect.top+(cl2.r+0.5)*(rect.height/rows), t:performance.now(), c:Math.random()<0.3?'#7db0ff':'#ffffff'});
+          }
+        }
+        if(p<1) requestAnimationFrame(frame);
+        else { cv.remove(); if(buildFront&&buildFront.el===el) buildFront=null; resolve(); }
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+  async function teethStep(step, gen){
+    var grid=step.target, mock=document.getElementById('mockBox');
+    focusEl=grid;
+    await wait(140);
+    if(gen!==generation) return false;
+    mock.classList.remove('teeth-wait'); // teeth pop in one by one via their --d delays
+    var dur=32*30+420, start=performance.now();
+    while(performance.now()-start<dur){
+      if(gen!==generation){ buildFront=null; return false; }
+      var p=Math.min(1,(performance.now()-start)/dur);
+      buildFront={el:grid, fx:(p*8)%1, fy:p}; // crew sweeps the chart row by row with the teeth
+      await wait(55);
+    }
+    buildFront=null;
+    return true;
+  }
+  async function runStep(step, gen, name){
+    var el=step.target;
+    focusEl=el; // crew glides onto this new sub-target (stations are persistent now)
+    pickCrew(el, step.kind); // JOIN DECISIONS: crew size follows THIS inner piece's size
+    await wait(210+Math.random()*150); // time to actually arrive & settle before work starts
+    if(gen!==generation) return false;
+    if(step.kind==='reveal'){
+      el.classList.remove('sub-hidden');
+      if(el.classList.contains('build-item')){ el.classList.remove('pending'); el.classList.add('built'); }
+      await wait(60);
+    } else if(step.kind==='teeth'){
+      if(!await teethStep(step, gen)) return false;
+    } else {
+      el.classList.add('pix');
+      if(el.classList.contains('build-item')) el.classList.remove('pending'); else el.classList.remove('sub-hidden');
+      var dur= step.kind==='frame'? DUR.frame(el) : (DUR[step.kind]? DUR[step.kind]() : DUR.block());
+      await pixelBuild(el, dur, gen);
+      el.classList.remove('pix');
+      if(gen!==generation) return false;
+      if(el.classList.contains('build-item')) el.classList.add('built');
+      if(step.kind==='frame' && el.classList.contains('white-card')) el.classList.remove('no-frame');
+    }
+    if(gen===generation) completionDecisions(el, step.kind); // some bots may stay behind & tweak this finished piece
+    // register substantial finished pieces as patrol targets, so standby bots
+    // always have older containers to keep working on
+    if(gen===generation && (step.kind==='frame'||step.kind==='block'||step.kind==='stat'||step.kind==='chip')){
+      var ew=el.offsetWidth||0, eh=el.offsetHeight||0;
+      if(ew>=40 && eh>=24 && builtEls.indexOf(el)<0){ builtEls.push(el); if(builtEls.length>48) builtEls.shift(); }
+      assignStandby();
+    }
+    builtSteps++; updateHUD(name);
+    await wait(130+Math.random()*110); // a beat of calm before the crew moves on
+    return gen===generation;
+  }
+
+  async function buildSection(section, gen){
+    var name=section.getAttribute('data-build-name')||section.id;
+    swarmMode='building';
+    section.classList.add('is-building');
+    var tag=section.querySelector('.build-tag'); if(tag) tag.textContent='» Building — '+name+'…';
+    updateHUD(name);
+    var steps=sectionSteps[section.id]||[];
+    var startAt=sectionCursor[section.id]||0;
+    for(var i=startAt;i<steps.length;i++){
+      if(gen!==generation) return; // replay aborted us
+      // FAST-SCROLL PRE-EMPT: this section is now far off-screen while a
+      // queued section sits in front of the reader — suspend here (the
+      // cursor keeps our progress), rejoin the back of the queue, and let
+      // the swarm go build what the reader is looking at instead of
+      // parking at base while an unseen section finishes above/below.
+      if(sectionFarFromView(section) && queue.some(sectionNearView)){
+        state[section.id]='queued';
+        queue.push(section);
+        sortQueueByView();
+        section.classList.remove('is-building');
+        if(tag) tag.textContent='⬚ Queued — bots will return';
+        focusEl=null; buildFront=null; swarmMode='home';
+        updateHUD(null);
+        return;
+      }
+      var ok=await runStep(steps[i], gen, name);
+      if(!ok) return;
+      sectionCursor[section.id]=i+1;
+    }
+    sectionCursor[section.id]=0;
+    focusEl=null;
+    section.classList.remove('is-building');
+    section.classList.add('is-built');
+    if(tag) tag.textContent='✓ Built';
+    state[section.id]='built';
+    builtSections++;
+    // ---- Return home: the whole swarm leaves the finished section and flies
+    // back to the staging cluster, then waits there for the next scroll. ----
+    swarmMode='returning';
+    randomizeHome();
+    hudMain.textContent='Swarm build';
+    if(builtSections<sections.length){
+      hudSection.textContent=' · '+name+' done — bots returning to base · '+builtSections+'/'+sections.length+' sections built';
+    }
+    await wait(1500); // time to visibly swoop back home (varied paths, per-bot speeds)
+    if(gen!==generation) return;
+    swarmMode='home';
+    updateHUD(null);
+    await wait(650 + Math.random()*450); // a beat parked at home before the next job
+    if(gen!==generation) return;
+  }
+
+  async function processQueue(gen){
+    if(building) return;
+    building=true;
+    while(queue.length){
+      var s=queue.shift();
+      if(state[s.id]==='built'){ continue; }
+      state[s.id]='building';
+      await buildSection(s, gen);
+      if(gen!==generation){ building=false; processQueue(generation); return; }
+    }
+    building=false;
+  }
+  function enqueue(section){
+    if(state[section.id]==='queued'){ processQueue(generation); return; }
+    if(state[section.id]!=='pending') return;
+    state[section.id]='queued';
+    queue.push(section);
+    sortQueueByView(); // the section in front of the reader builds first
+    processQueue(generation);
+  }
+
+  var observer=null;
+  function armObserver(){
+    if(observer) observer.disconnect();
+    observer=new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting) enqueue(e.target); });
+    },{threshold:0.12, rootMargin:'0px 0px -8% 0px'});
+    sections.forEach(function(s){ observer.observe(s); });
+  }
+
+  /* Safety net for fast scrolls and instant jumps (anchor links, End key,
+     scrollbar drags): the observer can coalesce or skip sections that were
+     never on screen long enough to cross its threshold, leaving them
+     pending forever. A throttled scroll scan enqueues any pending section
+     that is actually in the viewport, observer or not. */
+  var scanAt=0;
+  window.addEventListener('scroll',function(){
+    var now=Date.now(); if(now-scanAt<160) return; scanAt=now;
+    sections.forEach(function(s){
+      if(state[s.id]!=='pending') return;
+      var r=s.getBoundingClientRect();
+      if(r.bottom>60 && r.top<window.innerHeight-60) enqueue(s);
+    });
+    if(queue.length>1) sortQueueByView();
+  },{passive:true});
+
+  function resetAll(){
+    generation++;
+    queue=[]; building=false; focusEl=null; lastFocusEl=null; swarmMode='home'; burstPoint=null;
+    sections.forEach(function(s){ sectionCursor[s.id]=0; });
+    crewIdxs=[]; currentDesired=CORE_CREW; builtEls.length=0;
+    // decision network resets to its waiting state
+    decisionLog.length=0; pinnedBotIdx=-1; watchedBotIdx=-1; shownEvent=null; brainPulse=null; pendingWatch=null;
+    sessionDecisionCount=0; sessionDecisionTimes.length=0; serviceLog.length=0; hubPulses.length=0;
+    sessionActionCounts={ join:0, move_on:0, stay_tweak:0, return_base:0 };
+    swarmPulses.length=0; componentList.length=0; document.body.removeAttribute('data-selected-bot');
+    var fl=document.getElementById('brainFeedList');
+    if(fl) fl.innerHTML='<div class="feed-empty" id="brainFeedEmpty">No decisions yet — scroll to a build and the feed fills with real events.</div>';
+    updateBrainHeader();
+    bots.forEach(function(b){ cleanupMicro(b); }); dust.length=0; tints.length=0;
+    hideBubble(); if(pendingTap){ clearTimeout(pendingTap.timer); pendingTap=null; }
+    stepTargets.forEach(function(el){ if(el.style) el.style.transform=''; }); // clear any tweaker nudges
+    document.querySelectorAll('.build-progress').forEach(function(p){p.remove();});
+    builtItems=0; builtSections=0;
+    sections.forEach(function(s){
+      state[s.id]='pending';
+      s.classList.remove('is-built','is-building');
+      var tag=s.querySelector('.build-tag'); if(tag) tag.textContent='⬚ Unbuilt — bots incoming';
+      s.querySelectorAll('.build-item').forEach(function(it){
+        it.classList.remove('built','building','is-targeted'); removeCorners(it); it.classList.add('pending');
+      });
+    });
+    builtSteps=0; buildFront=null; sparks.length=0;
+    stepTargets.forEach(function(el){ el.classList.add('sub-hidden'); });
+    document.querySelectorAll('.pixveil').forEach(function(v){ v.remove(); });
+    document.querySelectorAll('.pix').forEach(function(el){ el.classList.remove('pix'); });
+    var mb0=document.getElementById('mockBox'); if(mb0) mb0.classList.add('teeth-wait');
+    document.querySelectorAll('.white-card').forEach(function(c){ c.classList.add('no-frame'); });
+    updateHUD(null);
+    makeBots();
+    updateCrewHud();
+  }
+
+  /* ---------- Init ---------- */
+  allItems.forEach(function(it){ it.classList.add('pending'); });
+  // Break every container into its inner-component steps before anything builds
+  sections.forEach(function(s){
+    var steps=[];
+    Array.prototype.slice.call(s.querySelectorAll('.build-item')).forEach(function(it){ collectSteps(it, steps, true); });
+    sectionSteps[s.id]=steps; totalSteps+=steps.length;
+  });
+  var mbInit=document.getElementById('mockBox'); if(mbInit) mbInit.classList.add('teeth-wait');
+  document.querySelectorAll('.white-card').forEach(function(c){ c.classList.add('no-frame'); });
+  updateHUD(null);
+  makeBots();
+  updateBrainHeader();
+  drawBrain(performance.now(), true);
+  if(reduced){
+    // No long construction: build instantly as sections appear, bots drawn once statically
+    sections.forEach(function(s){
+      s.querySelectorAll('.build-item').forEach(function(it){ it.classList.remove('pending'); it.classList.add('built'); });
+      s.classList.add('is-built'); state[s.id]='built';
+    });
+    stepTargets.forEach(function(el){ el.classList.remove('sub-hidden'); });
+    var mbR=document.getElementById('mockBox'); if(mbR) mbR.classList.remove('teeth-wait');
+    document.querySelectorAll('.white-card').forEach(function(c){ c.classList.remove('no-frame'); });
+    builtItems=totalItems; builtSteps=totalSteps; builtSections=sections.length; updateHUD(null);
+    resize(); bots.forEach(function(b){ drawBot(b, 1200); });
+  } else {
+    armObserver();
+    raf=requestAnimationFrame(loop);
+    // Hero is at the top — kick it off right away
+    setTimeout(function(){ enqueue(document.getElementById('heroSec')); }, 250);
+  }
+
+  document.getElementById('brainAutoBtn').addEventListener('click',function(){ unpinBrain(); });
+  var clearSelBtnEl=document.getElementById('clearSelBtn'); if(clearSelBtnEl) clearSelBtnEl.addEventListener('click',function(){ clearSelection(); });
+  var tabW=document.getElementById('tabWebsite'), tabN=document.getElementById('tabNetwork');
+  if(tabW) tabW.addEventListener('click',function(){ switchView('website'); });
+  if(tabN) tabN.addEventListener('click',function(){ switchView('network'); });
+  document.querySelectorAll('header nav a').forEach(function(a){ a.addEventListener('click',function(){ if(currentView!=='website') switchView('website'); }); });
+  if(bubbleEl) bubbleEl.addEventListener('click',function(e){
+    if(e.target.closest && e.target.closest('#bbCloseBtn')) clearSelection();
+    else if(e.target.closest && e.target.closest('#bbWatchBtn')) switchView('network');
+  });
+  var swarmCvEl=document.getElementById('swarmCanvas');
+  if(swarmCvEl) swarmCvEl.addEventListener('pointerup',function(e){
+    var rect=swarmCvEl.getBoundingClientRect();
+    var mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    var best=-1, bd=32*32;
+    swarmBotNodes.forEach(function(n){ var dx=n.x-mx, dy=n.y-my, d=dx*dx+dy*dy; if(d<bd){ bd=d; best=n.idx; } });
+    if(best>=0){ lastTapPoint={x:e.clientX, y:e.clientY}; pinBot(best); }
+  });
+  document.body.setAttribute('data-view','website'); document.body.setAttribute('data-current-view','website');
+  renderDetailStrip();
+  if(window.location.hash==='#brain') switchView('network');
+  document.getElementById('replayBtn').addEventListener('click',function(){
+    resetAll();
+    window.scrollTo({top:0,behavior:'smooth'});
+    armObserver();
+    if(!raf && !reduced) raf=requestAnimationFrame(loop);
+    setTimeout(function(){ enqueue(document.getElementById('heroSec')); }, 500);
+  });
+})();
+</script>
+</body>
+</html>
